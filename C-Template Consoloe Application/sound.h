@@ -1,0 +1,24 @@
+/* This file was automatically generated.  Do not edit! */
+int sound_main(int argc,char *argv[]);
+int onExit(void);
+void audioCallbacku8(void *unused,Uint8 *byteStream,int bsl);
+void logSpec(SDL_AudioSpec *as);
+extern SIMFW simfw;
+extern int shift;
+extern double fys;
+extern double fy;
+extern SDL_bool running;
+extern SDL_Event event;
+extern SDL_AudioSpec audioSpec;
+extern SDL_AudioDeviceID AudioDevice;
+extern Uint8 audioMainAccumulator;
+extern Sint32 audioMainLeftOff;
+extern SDL_atomic_t audioCallbackLeftOff;
+extern float *audioBuffer;
+extern Uint32 audioBufferLength;
+extern double practicallySilent;
+extern Uint32 msPerFrame;
+extern Uint32 floatStreamLength;
+extern Uint32 sampleRate;
+extern const double Tao;
+extern const double ChromaticRatio;
