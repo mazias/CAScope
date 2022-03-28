@@ -35,3 +35,5 @@ I am planning to update the documentation, but if you are curious have a look on
 
 All the settings are saved in `settings.txt` when you **close the program by pressing F4**. The settings are loaded when CAScope is started. You can easily edit this file with any text editor!
 
+## Screenshots
+
