@@ -36,4 +36,29 @@ I am planning to update the documentation, but if you are curious have a look on
 All the settings are saved in `settings.txt` when you **close the program by pressing F4**. The settings are loaded when CAScope is started. You can easily edit this file with any text editor!
 
 ## Screenshots
-
+![yy](/screenshots/TS-3N-3#-e4R-3019144G-1920SX.png)
+TS-3N-3#-e4R-6234752G-1700SX.png
+TS-3N-3#-e4R-6260750G-1920SX.png
+TS-3N-3#-e4R-10168920G-1920SX.png
+TS-3N-3#-e4R-10170662G-1700SX.png
+TS-3N-3#-e4R-10894464G-1366SX.png
+TS-3N-3#-e4R-13789814G-1366SX.png
+TS-3N-3#-e4R-20999125G-1920SX.png
+TS-3N-3#-e4R-857353169G-1920SX.png
+TS-3N-3#-e7R-1027093G-500SX.png
+TS-3N-4#-3f0e5R-308631G-1366SX.png
+TS-3N-4#-6e93aR-35283G-1366SX.png
+TS-3N-4#-15dceR-2212619G-1267SX.png
+TS-3N-4#-471f6R-229852G-1366SX.png
+TS-3N-4#-471f6R-1015600G-1366SX.png
+TS-3N-4#-bb007R-2184189G-1366SX.png
+TS3N4#f45c4-1124.png
+TS-3N-3#-18aR-181390G-1920SX.png
+TS-3N-3#-56fR-2806362G-1700SX.png
+TS3N3#65-63067.png
+TS3N3#79f-107574.png
+TS-3N-3#-102R-404500G-1267SX.png
+TS-3N-3#-412R-21817637G-1821SX.png
+TS-3N-3#-60418bd26a0R-10947615G-1821SX.png
+TS-3N-3#-e4R-90435G-1920SX.png
+TS-3N-3#-e4R-640618G-1700SX.png
