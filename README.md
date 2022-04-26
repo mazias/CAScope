@@ -1,11 +1,24 @@
 # CAScope
 The most powerful and most performant tool to explore the world of one-dimensional cellular automata.
 
-## Introduction
+## What's so special about it?
+Cellular automata are an immensely fascinating topic on their own.
+Studying them can give you insights into a wide range of disciplines, from mathematics and logic to physics, biology to computational theory to name a few.
+You can easily find further information about cellular automata by using your favorite internet services.
+One special recommendation for the uninitiated is of course Stephen Wolfram's magnum opus "A New Kind of Science" (ANKS) which is freely available here: https://www.wolframscience.com/nks/
+
+For the context of the program presented here, I would highlight the following facts:
+One-dimensional cellular automata are among the most simple dynamic systems that can possibly exist. Even then they show astonishingly complex patterns and behaviors.
+But the more complex patterns will only emerge on very large cellular automata with millions of cells and they are nearly impossible to see when displayed using conventional techniques.
+
+This is where CAScope comes in. Like a microscope or a telescope, it gives the viewer a tool to explore a new, previously inaccessible cosmos.
+This is accomplished by using new and innovative techniques for displaying cellular automata and are able to handle a very large number of cells and offer comprehensive noise reducing abilities. CAScope also offers numerous advanced and highly optimized computation algorithms that can compute the evolution with a speed of more than a 100 billion (10^12) cells per second (using AVX2 on a standard Intel i7). The algorithms are heavily optimized for parallel execution, so the use of professional GPU cards could allow for speeds of 10^14 cells a second and beyond (GPU features are currently in development). The newest computation algorithm adapts the groundbreaking hashlife algorithm that Bill Gosper devised for the 2D cellular automata "Game of Life" and allows for speeds well beyond 10^20 for certain cellular automata.
+
+## Disclaimer
 This is work in progress!
 I may update the documentation, source code and build documentation from time to time.
 
-If you have _serious_ interest in this software (wheather of scientific or recreational nature), you can contact me and I will be happy to help you out.
+If you have _serious_ interest in this software (whether of scientific or recreational nature), you can contact me and I will be happy to help you out.
 
 But please understand that this is a very niche project and I do not have the resources atm to present you a polished product.
 
