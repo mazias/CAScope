@@ -1228,26 +1228,7 @@ ca_next_gen__simd(
 
 
 
-typedef enum {
-	CM_DISABLED,			// no computation 
-	CM_SISD,				// single instrunction single data
-	CM_SIMD,				// single instruction multiple data
-	CM_LUT,					// look-up-table		bit-array
-	CM_HASH,				// hash-table			bit-array needed
-	CM_VBA_1x256,			// vertical-bit-array - 1 lane with 256bits (AVX)
-	CM_BOOL,				// boolean operators	bit-array
-	CM_VBA_1x32,			// vertical-bit-array - 1 lane with 32bit
-	CM_VBA_2x32,			// vertical-bit-array - 2 lanes with 32bit
-	CM_VBA_4x32,			// vertical-bit-array - 4 lanes with 32bit
-	CM_OMP_VBA_8x32,		// vertical-bit-array - 2 lanes with 256bits (AVX)
-	CM_VBA_1x64,			// vertical-bit-array - 1 lane with 64bit
-	CM_VBA_16x256,			// vertical-bit-array - 16 lanes with 256bits (AVX)
-	CM_VBA_2x256,			// vertical-bit-array - 2 lanes with 256bits (AVX)
-	CM_OMP_VBA_8x1x256,		// vertical-bit-array - 8 lanes with 256bits (AVX)
-	CM_OMP_TEST,
-	CM_OPENCL,				// vertical-bit-array 
-	CM_MAX,
-} caComputationMode;
+
 
 static UINT8* calt = NULL;							// ca-lookup-table/lut
 
@@ -2366,6 +2347,7 @@ void CA_CNITFN_VBA_16x256(caBitArray* vba, CA_RULE* cr) {
 
 int64_t CA_CNFN_VBA_16x256(int64_t pgnc, caBitArray* vba) {
 	// WORK IN PROGRESS
+	/* Idea is to use all 16 AVX regsiters */
 	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
 	while (pgnc > 0) {
 		pgnc -= 4;
@@ -2529,7 +2511,7 @@ int64_t CA_CNFN_VBA_1x32(int64_t pgnc, caBitArray* vba) {
 
 		UINT32* vbac = (UINT32*)vba->v;
 		for (int ri = 0; ri < vba->rc; ++ri) {
-			vbac[ri] = vbac[ri + 1] ^ (vbac[ri] | vbac[ri + 2]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+			vbac[ri] = vbac[ri + 1] ^ (vbac[ri] | vbac[ri + 2]);				// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
 		}
 
 		pgnc--;
@@ -2650,18 +2632,33 @@ int64_t CA_CNFN_OPENCL(int64_t pgnc, caBitArray* vba) {
 	return 0;
 }
 
-//typedef struct CA_CNSG {
-//	char* name;
-//	int (*cnfn)(int, caBitArray*);
-//	void (*itfn)(caBitArray*);
-//};
+typedef enum {
+	CM_DISABLED,			// computation disabeld
+	CM_SISD,				// byte-array			single instrunction single data
+	CM_SIMD,				// byte-array			single instruction multiple data
+	CM_LUT,					// bit-array			look-up-table
+	CM_BOOL,				// bit-array			boolean operators				rule 54 hardcoded
+	CM_HASH,				// bit-array			hash-table
+	CM_VBA_1x256,			// vertical-bit-array	AVX	- 1 lane with 256bits		rule 54 hardcoded
+	CM_VBA_1x32,			// vertical-bit-array	1 lane with 32bit				rule 54 hardcoded
+	CM_VBA_2x32,			// vertical-bit-array	2 lanes with 32bit				rule 54 hardcoded
+	CM_VBA_4x32,			// vertical-bit-array	4 lanes with 32bit				rule 54 hardcoded
+	CM_OMP_VBA_8x32,		// vertical-bit-array	OpenMP - 8 lanes with 32bit		rule 54 hardcoded
+	CM_VBA_1x64,			// vertical-bit-array	1 lane with 64bit				rule 54 harcoded
+	CM_VBA_16x256,			// vertical-bit-array	AVX - 16 lanes with 256bit		rule 54 harcoded
+	CM_VBA_2x256,			// vertical-bit-array	AVX - 2 lanes with 256bit		rule 54 harcoded
+	CM_OMP_VBA_8x1x256,		// vertical-bit-array	AVX & OpenMP - 8 lanes with 256bit	rule 54 harcoded
+	CM_OMP_TEST,			// OpenMP Test
+	CM_OPENCL,				// OpenCL
+	CM_MAX,
+} caComputationMode;
 
 struct {
 	char* name;
 	int64_t		(*cnfn)(int64_t, caBitArray*);	// computation-function
 	void		(*itfn)(caBitArray*);			// init-function
 	void		(*scfn)(caBitArray*);			// sync-(ca-space)-function
-} const ca_cnsgs[CM_MAX] = {
+} const ca_cnsgs[CM_MAX] = {					// computation-settings-array
 	[CM_VBA_1x256] = {
 		.name = "CM_VBA_1x256",
 		.cnfn = CA_CNFN_VBA_1x256,
@@ -2749,19 +2746,6 @@ struct {
 		.scfn = CA_SCFN_HASH
 	},
 };
-
-////typedef int CA_CNFN(int, caBitArray*);					// celluar-automaton-computation-function type
-////CA_CNFN* const ca_cnfns[CM_MAX] = {							// celluar-automaton-computation-functions
-////};
-////
-////typedef void CA_CNITFN(caBitArray*);					// celluar-automaton-computation-initialization-function type
-////CA_CNFN* const ca_cnitfns[CM_MAX] = {							// celluar-automaton-computation-initialization-functions
-////
-////};
-////
-////const char* const cm_names[CM_MAX] = {
-////};
-
 
 #define CS_SYS_BLOCK_SZ	0x04			// system-block-size - used by bit-shifting operations
 #define CS_BLOCK_SZ		0xFF			// size of one row / nr. of columns
@@ -3991,12 +3975,18 @@ if (cnmd == CM_HASH) {
 
 	/* Init color table */
 	int dyss;
-	if (!ds.fsme)
+	switch (ds.fsme == 0) {
+	case 0: 
 		dyss = max(1, (cr->ncs * (max(1, max(1, ds.hlfs) * max(1, ds.vlfs)))) >> stst);
-	else
+		break;
+	case 1:
 		dyss = max(1, ipow(cr->ncs, ds.hlfs * ds.vlfs) >> stst);
+		break;
+	default:
+		dyss = 0;
+	}
 	static UINT32* cltbl = NULL;						// color table
-	if (!cltbl || dyrt) {
+	if (dyss && (!cltbl || dyrt)) {
 		free(cltbl);
 		cltbl = malloc(dyss * sizeof * cltbl);
 	}
@@ -4737,7 +4727,13 @@ CA_MAIN(void) {
 		//
 		nkb = eikb;
 		nkb.name = "computation-mode"; nkb.description = "";
-		/// CNMD! nkb.value_strings = cm_names; 
+		// create value-strings-array
+		const char* cm_names[CM_MAX];
+		for (int c = 0; c < CM_MAX; c++) {
+			cm_names[c] = ca_cnsgs[c].name;
+		}
+		nkb.value_strings = cm_names; 
+		//
 		nkb.val = &cnmd;
 		nkb.cgfg = &res;
 		nkb.slct_key = SDLK_F5;
