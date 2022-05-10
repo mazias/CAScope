@@ -69,7 +69,7 @@ typedef struct caDisplaySettings {
 	int vlpz;										// vertical pixel zoom
 	int hlpz;										// horizontal pixel zoom
 	int stzm;										// state zoom - 0 = direct zoom on intensity
-	int sm;											// stripe-mode
+	int sm;											// scanline-mode
 	int mdpm;										// mode-paramter (used by sfcm-modes)
 	int hddh;										// hash-display-depth
 	int hdll;										// hash-display-level
@@ -3789,7 +3789,7 @@ lifeanddrawnewcleanzoom(
 	caDisplaySettings ds								// display settings
 )
 {
-	/* Return if time is zero */
+	/* Abort if time is zero */
 	if (!tm)
 		return;
 
@@ -3817,7 +3817,7 @@ lifeanddrawnewcleanzoom(
 		hw = max(hwmn, ds.plw - ceil(sqrt(scsz)) * ds.hlpz * 2);
 
 	if (ds.fsme == 2 && cnmd != CM_HASH)				// focus-mode can only be in hash-mode when computing-mode is in hash-mode as well
-		ds.fsme = 1;
+		ds.fsme = 0;
 
 	int pbs = scsz;										// pixel-buffer-size (one line / space-size div horizontal-zoom)
 	static int last_pbs = 0;
@@ -3845,37 +3845,26 @@ lifeanddrawnewcleanzoom(
 		for (UINT32* tpnc = pnv; tpnc < pni; ++tpnc)
 			*tpnc = 0;
 
-	/* Stripe-mode initialization */
-	if (ds.sm) {
-		// center verticaly
-		int al = (pni - pnv) / ds.plw;
-		int ls = 0;
-		if (al > pbs)
-			ls = al % pbs;
-		pnv += ds.plw * (ls / 2 + ls % 2);
-		pni -= ds.plw * (ls / 2);
-		//// center horizontaly
-		if (ds.plw > pbs)
-			pnv += (ds.plw % pbs) / 2;
-	}
-	static UINT32* spnc = NULL;	// static pixel screen cursor; needed for stripe mode
+	/* Scanline-mode initialization */
+	static UINT32* spnc = NULL;							// static pixel screen cursor; needed for scanline mode
 	if (!spnc || dyrt)
 		spnc = pnv;
 
 	/* Inititalize pixel-display-cursor */
+	// screen-filling-curve mode
 	if (ds.sfcm) {
-		// screen-filling-curve mode enabled
 		pnc = pnv;
 	}
+	// scroll-mode (scanline-mode disabled)
 	else if (!ds.sm) {
-		// scroll-mode
 		/* Scroll pixel-screen to make room to draw tm pixels */
-		int64_t vlsl = tm / max(1, ds.vlzm) * ds.vlpz;				// vertical scroll / lines to scroll
+		int64_t vlsl = tm / ds.vlzm * ds.vlpz;	// vertical scroll / lines to scroll
 		tm = vlsl * ds.vlzm / ds.vlpz;
-		int hlsl = 0;										// horizontal scroll
-		///if (pbs == plw) {									// horizontal scrolling is (atm) only possible when output- and display-width are the same 
-		///	hlsl = min(plw, (tm % (scsz * vlzm)) / max(1, vlzm * hlzm));				// horizontal scroll / nr. of pixels to scroll
-		///}
+		int hlsl = 0;									// horizontal scroll
+		// horizontal scrolling is disabled atm since it does not work together with the histogram
+		// and is only possible when output-width and display-width are the same 
+		// if (pbs == plw)
+		//     hlsl = min(plw, (tm % (scsz * vlzm)) / max(1, vlzm * hlzm));				// horizontal scroll / nr. of pixels to scroll
 		if (vlsl * ds.plw < pni - pnv) {
 			pnc = max(pnv, pni - vlsl * ds.plw - hlsl);			// set cursor to first pixel that has to be drawn
 			scroll(pnv, (pni - pnv) * 4, -(pni - pnc) * 4);		// scroll is measured in nr of pixels > convert to argb-pixel with size of 4 byte
@@ -3883,12 +3872,9 @@ lifeanddrawnewcleanzoom(
 		else
 			pnc = pnv;
 	}
+	// scanline-mode
 	else {
 		pnc = spnc;
-	}
-
-	if (pbs != ds.plw) {
-		//printf("tm %d sl %d/%d  plw %d   pc %d %d %d\n", tm, vlsl, hlsl, plw, pnc - pnv, pni - pnv, pni - pnc);		// scroll measures in bytes - 1 argb-pixel = 4 byte
 	}
 
 	/* Init pixel-buffer */
@@ -3960,7 +3946,7 @@ if (cnmd == CM_HASH) {
 
 	/* Init color table */
 	int dyss;
-	switch (ds.fsme == 0) {
+	switch (ds.fsme) {
 	case 0: 
 		dyss = max(1, (cr->ncs * (max(1, max(1, ds.hlfs) * max(1, ds.vlfs)))) >> stst);
 		break;
@@ -4006,88 +3992,69 @@ if (cnmd == CM_HASH) {
 	double dmn;											// double min
 	double dmx;											// double max
 
-	if (pnc >= pni)										// drawing enabled
-		de = 0;
-
 	int64_t otm = tm;									// original time
 
 	while (1) {
-		/* DISPLAY - Copy as much pixels as possible from the pixel-buffer to the pixel-screen */
-		if (de && pbc < pbi) {
-			/* There are 3 drawing modes
-			 * 1. 1d-scroll-mode - new ca-lines are drawn at bottom of screen, old ca-lines scroll up
-			 * 2. 1d-scanline-mode - a scanline moves repeatedly from top to bottom, new ca-lines are drawn at current scanline position
-			 * 3. screen-filling-curve-mode - the 1d ca-line is drawn on the 2d screen using one of several screen-filling-curves
-			 *
-			 * 1. and 2. can draw up to screen-height generations per frame and are best suited for small ca-spaces.
-			 * 3. can draw only one generation per frame and is best suited for very large ca-spaces.
-			*/
+		/* DISPLAY - Copy as much pixels as possible from the pixel-buffer to the pixel-screen.
+		   There are 3 drawing modes:
+		   * 1. 1d-scroll-mode - new ca-lines are drawn at bottom of screen, old ca-lines scroll up
+		   * 2. 1d-scanline-mode - a scanline moves repeatedly from top to bottom, new ca-lines are drawn at current scanline position
+		   * 3. screen-filling-curve-mode - the 1d ca-line is drawn on the 2d screen using one of several screen-filling-curves
+		*/
+		if (de && pbc < pbi && pnc < pni) {
+			/* Line-mode (scroll or scanline) */
 			if (!ds.sfcm) {
 				for (int vi = 0; vi < ds.vlpz; ++vi) {
-					int cs =
-						(
-							min(ds.plw,
-								max(0,
-									min(
-										(pni - pnc),
-										ds.hlpz * (pbi - pbc)))));		// size of copy
-					if (cs > 0) {
-						if (!ds.sm && pbs * ds.hlpz > ds.plw)
-							pbc = pbv + (pbs * ds.hlpz - ds.plw) / 2 / ds.hlpz;
-						if (!ds.sm && pbs * ds.hlpz < ds.plw)
-							pnc += (ds.plw - pbs * ds.hlpz) / 2;
-
-						if (ds.hlpz > 1) {
-							for (int hi = 0; hi < cs / ds.hlpz; ++hi) {
-								for (int hzi = 0; hzi < ds.hlpz; ++hzi) {
-									*pnc = *pbc;
-									++pnc;
-								}
-								++pbc;
+					int cs = min(ds.plw, min((pni - pnc), ds.hlpz * (pbi - pbc)));		// size of copy
+					/* Horizontal-centering */
+					if (pbs * ds.hlpz > ds.plw - hw)
+						pbc = pbv + (pbs * ds.hlpz - ds.plw - hw) / 2 / ds.hlpz;
+					if (pbs * ds.hlpz < ds.plw - hw)
+						pnc += hw + (ds.plw - pbs * ds.hlpz - hw) / 2;
+					/* Copy bixel-buffer to pixel-screen */
+					// horizontal-zoom enabled
+					if (ds.hlpz > 1) {
+						for (int hi = 0; hi < cs / ds.hlpz; ++hi) {
+							for (int hzi = 0; hzi < ds.hlpz; ++hzi) {
+								*pnc = *pbc;
+								++pnc;
 							}
+							++pbc;
 						}
-						else {
-							memcpy(pnc, pbc, cs * 4);
-							pbc = pbi;
-							pnc += cs;
-						}
-
-						if (ds.sm) {
-							if (pbs < ds.plw)
-								pnc += ds.plw - pbs;
-							if (pnc >= pni) {
-								if (pbs > ds.plw)
-									pnc = pnv;
-								else
-									pnc = pnv + (pnc - pnv) % ds.plw + pbs;
-								if (pnc + pbs > pnv + ds.plw)
-									pnc = pnv;
-								if (tm > pni - pnv)
-									de = 0;
-							}
-							spnc = pnc;
-						}
-						pnc += (pni - pnc) % ds.plw;
-						pbc = pbv;
 					}
+					// horizontal-zoom disabled
 					else {
-						if (pni - pnc == 0)
+						memcpy(pnc, pbc, cs * 4);
+						pbc = pbi;
+						pnc += cs;
+					}
+					/* Set pixel-screen-cursor to next line */
+					// scanline-mode disabled (scrolling enabled)
+					if (!ds.sm) {
+						pnc += (pni - pnc) % ds.plw;
+						if (pnc >= pni)								// disable drawing if one complete screen (all available lines) has been drawn
 							de = 0;
 					}
+					// scanline-mode enabled
+					else {
+						if (pbs < ds.plw)
+							pnc = pnv + ((pnc - pnv) / ds.plw + 1) * ds.plw;
+						if (pnc >= pni)
+							pnc = pnv;
+						if (pnc == spnc)							// disable drawing if one complete screen (all available lines) has been drawn
+							de = 0;
+					}
+					// reset pixel-buffer-cursor
+					pbc = pbv;
 				}
 			}
-			else if (ds.sfcm >= 1 && ds.sfcm <= 4) {
-				//printf("display_2d_matze ds   vlpz %d  hlpz %d  pbv %x pbi %x\n", ds.vlpz, ds.hlpz, pbv, pbi);
+			/* Screen-filling-curve-modes */
+			else if (ds.sfcm <= 4)
 				display_2d_matze(pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcm - 1, ds.mdpm);
-				//de = 0;
-			}
-			else if (ds.sfcm > 4 && ds.sfcm < 5 + LMS_COUNT) {
+			else if (ds.sfcm < 5 + LMS_COUNT)
 				display_2d_lindenmeyer(LMSA[ds.sfcm - 5], pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcsw, -1, NULL, NULL, NULL);
-				//de = 0;
-			}
-			else {
+			else
 				display_2d_chaotic(pnv + hw, pni, ds.plw, ds.plw - hw, csv, csi, pbv, pbi, dyrt);
-			}
 		}
 
 		if (tm < 1)
@@ -4125,7 +4092,7 @@ if (cnmd == CM_HASH) {
 			//
 //printf("/ %d   tm %u   de %d   scsz %d   brsz %d\n", gnc, tm, de, scsz, brsz);
 			tm -= (ognc - gnc);											// adjust time
-			csf -= ((ognc - gnc) * (cr->ncn / 2)) % scsz;								// correct for shift
+			csf -= ((ognc - gnc) * (cr->ncn / 2)) % scsz;				// correct for shift
 			if (csf < csv)
 				csf += scsz;
 			if (csf >= csi)
@@ -4457,6 +4424,9 @@ if (cnmd == CM_HASH) {
 		}
 	}
 
+	/* Remember current screen-position when in scanline-mode */
+	if (ds.sm)
+		spnc = pnc;
 	/* Copy space back with correct alignment */
 	if (ds.fsme < 2 || ds.tm == 2)
 		for (int i = 0; i < scsz; ++i)
@@ -4648,7 +4618,7 @@ CA_MAIN(void) {
 	ds.tm = 0;
 	ds.sd = 1.0;
 	ds.te = 0.0;
-	ds.sm = 0;					// stripe mode
+	ds.sm = 0;					// scanline-mode
 	ds.stzm = 1;				// state zoom - 0 = direct zoom on intensity
 	ds.sfcm = 1;				// screen-filling-curve-mode
 	ds.sfcsw = 1;				// screen-filling-curve-step-width
@@ -4803,7 +4773,7 @@ CA_MAIN(void) {
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
-		nkb.name = "display-stripe-mode";
+		nkb.name = "display-scanline-mode";
 		nkb.val = &ds.sm;
 		nkb.slct_key = SDLK_m;
 		nkb.min = 0; nkb.max = 1;
