@@ -3141,19 +3141,6 @@ test_simd_intrinsic() {
 }
 
 
-void
-test_parallel_add() {
-	test_simd_intrinsic();
-	printf("test parallel add\n");
-
-	UINT8 bts[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
-
-	*(UINT64*)(bts) = *((UINT64*)(bts)) + *((UINT64*)(bts + 1)) + *((UINT64*)(bts + 2));// = *(int*)bts[0] + *(int*)bts[1] + *(int*)bts[2];
-
-	printf("%d %d %d %d %d %d %d %d\n", bts[0], bts[1], bts[2], bts[3], bts[4], bts[5], bts[6], bts[7]);
-}
-
-
 #define LV_MAXCLTLSZ 32			// max size of rule table
 #define LV_MAXRLTLSZ 32			// max size of rule table
 
@@ -3817,48 +3804,46 @@ lifeanddrawnewcleanzoom(
 	if (!ds.vlfs || !ds.hlfs)
 		ds.stzm = 0;
 	int tma = 0;										// time available (as stored in pixel buffer)
+	UINT32* pnc = pni;									// pixel-screen cursor / current position 
 
-	/* Make sure zoom-levels are at least 1 */
-	ds.hlzm = max(1, ds.hlzm);
+	ds.hlzm = max(1, ds.hlzm);							// make sure zoom-levels are at least 1
 	ds.vlzm = max(1, ds.vlzm);
 	ds.hlpz = max(1, ds.hlpz);
 	ds.vlpz = max(1, ds.vlpz);
 
-	/* Clear screen on reset - do this before pnv is moved to center/align the image */
-	if (dyrt || res)
-		for (UINT32* tpnc = pnv; tpnc < pni; ++tpnc)
-			*tpnc = 0;
+	int hwmn = 50;										// histogram-width-minimum
+	int hw = hwmn;										// histogram width
+	if (ds.sfcm)										// autosize of histogram-width when screen-filling-curve-mode is activated
+		hw = max(hwmn, ds.plw - ceil(sqrt(scsz)) * ds.hlpz * 2);
 
-	/* Histogram-width */
-	int hwmn = 50;									// histogram-width-minimum
-	int hw = hwmn;									// histogram width
-	if (ds.sfcm)
-		hw = max(hwmn, ds.plw - ceil(sqrt(scsz)) * ds.hlpz * 2);		// histogram width
-
-	if (ds.fsme == 2 && cnmd != CM_HASH)
+	if (ds.fsme == 2 && cnmd != CM_HASH)				// focus-mode can only be in hash-mode when computing-mode is in hash-mode as well
 		ds.fsme = 1;
 
-	int pbs = scsz;									// pixel-buffer-size (one line / space-size div horizontal-zoom)
+	int pbs = scsz;										// pixel-buffer-size (one line / space-size div horizontal-zoom)
 	static int last_pbs = 0;
 	if (ds.fsme == 2)
 		pbs >>= HCTBSPT + ds.hdll;
 	else
 		pbs /= ds.hlzm;
 	pbs = max(1, pbs);
-	const int stst = 0;								// state shiift (nr. of state bits shifted out / disregarded)
+	const int stst = 0;									// state shiift (nr. of state bits shifted out / disregarded)
 
-	ds.vlzm = max(ds.vlzm, ds.vlfs);				// vertical zoom can not be larger than zomm since it not possible (atm) to go back to previous generatios=lines
+	ds.vlzm = max(ds.vlzm, ds.vlfs);					// vertical zoom can not be larger than zomm since it not possible (atm) to go back to previous generatios=lines
 	if (ds.vlfs == 0 || ds.hlfs == 0)
 		ds.hlfs = ds.vlfs = 1;
 
 	/* size of one buffer
 	buffer must be large enough to always allow for readahead for next-gen-calculation (cr->ncn)
 	or drawing-calucaltions (hlfs) */
-	int brsz = max(ds.hlfs - 1, cr->ncn - 1);	// 32 to make sure simd instructions have enough room
-	brsz += 32;  // !! ??? Why is max 32 not enough???
+	int brsz = max(ds.hlfs - 1, cr->ncn - 1);			// buffer-size
+	// #TODO !! ??? Why is max 32 not enough???
+	brsz += 32;  
 	brsz = max(1024, brsz);
 
-	UINT32* pnc = pni;									// pixel-screen cursor / current position 
+	/* Clear screen on reset - do this before pnv is moved to center/align the image */
+	if (dyrt || res)
+		for (UINT32* tpnc = pnv; tpnc < pni; ++tpnc)
+			*tpnc = 0;
 
 	/* Stripe-mode initialization */
 	if (ds.sm) {
@@ -4352,8 +4337,8 @@ if (cnmd == CM_HASH) {
 		// compare
 		int mcr = memcmp(csv, tcsv, scsz * sizeof * csv);
 		if (mcr != 0) {
-			printf("TESTMODE ERROR  mcr %ld  gnc %d  sz %d  pos", otm, mcr, scsz * sizeof * csv);
-			int esf = 0, pd = 1, ec = 0, lp = 0;		// errors-found
+			printf("TESTMODE ERROR  mcr %d  tm %lld  sz %d", mcr, otm, scsz * sizeof * csv);
+			int esf = 0, pd = 1, ec = 0, lp = 0;		// esf=errors-found, pd=print-enabled, ec=error-count, lp=last-position
 			for (int c = 0; c < scsz; ++c) {
 				if (tcsv[c] != csv[c]) {
 					ec++;
@@ -4368,20 +4353,20 @@ if (cnmd == CM_HASH) {
 				}
 			}
 			printf("\n  lp %d  er %.2%%f\n", lp, 100.0 / scsz * ec);
-			getch();
+			printf("  Press any key\n"); getch();
 		}
 	}
 
 	/* Histogram */
 	if (hw > 0) {
 		int plh = (pni - pnv) / ds.plw;
-		int vs = 20;			// vertical spacing to screen border of histogram
-		int hh = plh - 2 * vs;	// histogram height
-		int dph = 3;// hh / 100;	// histogram height of one datapoint
+		int vs = 20;							// vertical spacing to screen border of histogram
+		int hh = plh - 2 * vs;					// histogram height
+		int dph = 3;// hh / 100;				// histogram height of one datapoint
 		/* history */
-		static uint16_t* hy = NULL;			// history
-		static int hyc = 0;					// history count
-		static int hyi = -1;				// history iterator
+		static uint16_t* hy = NULL;				// history
+		static int hyc = 0;						// history count
+		static int hyi = -1;					// history iterator
 		if (hyc != hw * dyss) {
 			hyc = hw * dyss;
 			free(hy);
@@ -4624,24 +4609,16 @@ void pixel_effect_hilbert(SIMFW* simfw) {
 
 void
 CA_MAIN(void) {
-	//test_parallel_add();
-	init_lmas();
+	init_lmas();								// init lindenmayer-arrays
 
 	srand((unsigned)time(NULL));
 	static pcg32_random_t pcgr;
 
 	/* Init */
-	//SDL_WINDOWPOS_CENTERED_DISPLAY(1)
-
 	SIMFW sfw = { 0 };
 	SIMFW_Init(&sfw, SIMFW_TEST_TITLE, SIMFW_TEST_DSP_HEIGHT, SIMFW_TEST_DSP_WIDTH,
 		SIMFW_TEST_DSP_WINDOW_FLAGS | SDL_WINDOW_RESIZABLE
 		, 0, 0);
-
-	//SIMFW_SetSimSize(&sfw, sfw.window_height * 2.0, sfw.window_width * 2.0);
-	//SIMFW_SetSimSize(&sfw, sfw.window_height * 4.0, sfw.window_width * 4.0);
-	//SIMFW_SetSimSize(&sfw, sfw.window_height / 5.0, sfw.window_width / 5.0);
-	//SIMFW_SetSimSize(&sfw, sfw.window_height / 4.0, sfw.window_width / 4.0);
 
 	double zoom = 1.0;
 
@@ -4650,7 +4627,6 @@ CA_MAIN(void) {
 	pixel_effect_moving_gradient(&sfw);
 	pixel_effect_hilbert(&sfw);
 	//sfw_test_rand(&sfw);
-
 
 	int ca_space_sz = 1 << 16;// sfw.sim_width * 1; // 256;
 	int rel_start_speed = 512;
@@ -4698,8 +4674,8 @@ CA_MAIN(void) {
 	cr.ncs = 3;
 	cr.ncn = 3;
 
-	int window_x_position = 0;
-	int window_y_position = 0;
+	int window_x_position = -1;
+	int window_y_position = -1;
 	int window_width = SIMFW_TEST_DSP_WIDTH;
 	int window_height = SIMFW_TEST_DSP_HEIGHT;
 	/* Init key-bindings */
@@ -4971,13 +4947,11 @@ CA_MAIN(void) {
 		nkb.val = &window_x_position;
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
-		SDL_GetWindowPosition(sfw.window, &window_x_position, &window_y_position);
 		nkb = eikb;
 		nkb.name = "window-width";
 		nkb.val = &window_width;
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
-		SDL_GetWindowPosition(sfw.window, &window_x_position, &window_y_position);
 		nkb = eikb;
 		nkb.name = "window-height";
 		nkb.val = &window_height;
@@ -4993,7 +4967,10 @@ CA_MAIN(void) {
 	}
 
 	/* Restore window position */
-	SDL_SetWindowPosition(sfw.window, window_x_position, window_y_position);
+	if (window_x_position == -1 && window_y_position == -1)
+		SDL_WINDOWPOS_CENTERED_DISPLAY(1);
+	else
+		SDL_SetWindowPosition(sfw.window, window_x_position, window_y_position);
 	SDL_SetWindowSize(sfw.window, window_width, window_height);
 	sfw.window_height = window_height;
 	sfw.window_width = window_width;
