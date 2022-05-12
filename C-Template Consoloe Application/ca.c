@@ -2633,32 +2633,33 @@ int64_t CA_CNFN_OPENCL(int64_t pgnc, caBitArray* vba) {
 }
 
 typedef enum {
-	CM_DISABLED,			// computation disabeld
-	CM_SISD,				// byte-array			single instrunction single data
-	CM_SIMD,				// byte-array			single instruction multiple data
-	CM_LUT,					// bit-array			look-up-table
-	CM_BOOL,				// bit-array			boolean operators				rule 54 hardcoded
-	CM_HASH,				// bit-array			hash-table
-	CM_VBA_1x256,			// vertical-bit-array	AVX	- 1 lane with 256bits		rule 54 hardcoded
-	CM_VBA_1x32,			// vertical-bit-array	1 lane with 32bit				rule 54 hardcoded
-	CM_VBA_2x32,			// vertical-bit-array	2 lanes with 32bit				rule 54 hardcoded
-	CM_VBA_4x32,			// vertical-bit-array	4 lanes with 32bit				rule 54 hardcoded
-	CM_OMP_VBA_8x32,		// vertical-bit-array	OpenMP - 8 lanes with 32bit		rule 54 hardcoded
-	CM_VBA_1x64,			// vertical-bit-array	1 lane with 64bit				rule 54 harcoded
-	CM_VBA_16x256,			// vertical-bit-array	AVX - 16 lanes with 256bit		rule 54 harcoded
-	CM_VBA_2x256,			// vertical-bit-array	AVX - 2 lanes with 256bit		rule 54 harcoded
-	CM_OMP_VBA_8x1x256,		// vertical-bit-array	AVX & OpenMP - 8 lanes with 256bit	rule 54 harcoded
-	CM_OMP_TEST,			// OpenMP Test
-	CM_OPENCL,				// OpenCL
+	CM_DISABLED,										// computation disabled
+	CM_SISD,											// byte-array			single instrunction single data
+	CM_SIMD,											// byte-array			single instruction multiple data
+	CM_LUT,												// bit-array			look-up-table
+	CM_BOOL,											// bit-array			boolean operators					rule 54 hardcoded
+	CM_HASH,											// bit-array			hash-table
+	CM_VBA_1x256,										// vertical-bit-array	AVX	- 1 lane with 256bits			rule 54 hardcoded
+	CM_VBA_1x32,										// vertical-bit-array	1 lane with 32bit					rule 54 hardcoded
+	CM_VBA_2x32,										// vertical-bit-array	2 lanes with 32bit					rule 54 hardcoded
+	CM_VBA_4x32,										// vertical-bit-array	4 lanes with 32bit					rule 54 hardcoded
+	CM_VBA_1x64,										// vertical-bit-array	1 lane with 64bit					rule 54 hardcoded
+	CM_VBA_2x256,										// vertical-bit-array	AVX - 2 lanes with 256bit			rule 54 hardcoded
+	CM_VBA_16x256,										// vertical-bit-array	AVX - 16 lanes with 256bit			rule 54 hardcoded
+	CM_OMP_VBA_8x32,									// vertical-bit-array	OpenMP - 8 lanes with 32bit			rule 54 hardcoded
+	CM_OMP_VBA_8x1x256,									// vertical-bit-array	AVX & OpenMP - 8 lanes with 256bit	rule 54 hardcoded
+	CM_OMP_TEST,										// OpenMP Test
+	CM_OPENCL,											// OpenCL
 	CM_MAX,
 } caComputationMode;
 
+// computation-settings-array
 struct {
 	char* name;
-	int64_t		(*cnfn)(int64_t, caBitArray*);	// computation-function
-	void		(*itfn)(caBitArray*);			// init-function
-	void		(*scfn)(caBitArray*);			// sync-(ca-space)-function
-} const ca_cnsgs[CM_MAX] = {					// computation-settings-array
+	int64_t		(*cnfn)(int64_t, caBitArray*);			// computation-function
+	void		(*itfn)(caBitArray*);					// init-function
+	void		(*scfn)(caBitArray*);					// sync-(ca-space)-function
+} const ca_cnsgs[CM_MAX] = {
 	[CM_VBA_1x256] = {
 		.name = "CM_VBA_1x256",
 		.cnfn = CA_CNFN_VBA_1x256,
@@ -2853,11 +2854,13 @@ uint32_t MortonEncode2(uint32_t x, uint32_t y)
 	return _pdep_u32(y, 0xAAAAAAAA) | _pdep_u32(x, 0x55555555);
 }
 
+
 __inline
 uint32_t MortonEncode3(uint32_t x, uint32_t y, uint32_t z)
 {
 	return _pdep_u32(y, 0x24924924) | _pdep_u32(y, 0x12492492) | _pdep_u32(x, 0x09249249);
 }
+
 
 __inline
 void MortonDecode2(uint32_t code, uint32_t* outX, uint32_t* outY)
@@ -2865,6 +2868,7 @@ void MortonDecode2(uint32_t code, uint32_t* outX, uint32_t* outY)
 	*outX = _pext_u32(code, 0x55555555);
 	*outY = _pext_u32(code, 0xAAAAAAAA);
 }
+
 
 __inline
 void MortonDecode3(uint32_t code, uint32_t* outX, uint32_t* outY, uint32_t* outZ)
@@ -2874,49 +2878,6 @@ void MortonDecode3(uint32_t code, uint32_t* outX, uint32_t* outY, uint32_t* outZ
 	*outZ = _pext_u32(code, 0x24924924);
 }
 
-//rotate/flip a quadrant appropriately
-__inline
-void ht_rot(int n, int* x, int* y, int rx, int ry) {
-	if (ry == 0) {
-		if (rx == 1) {
-			*x = n - 1 - *x;
-			*y = n - 1 - *y;
-		}
-
-		//Swap x and y
-		int t = *x;
-		*x = *y;
-		*y = t;
-	}
-}
-
-//convert (x,y) to d
-__inline
-int xy2d(int n, int x, int y) {
-	int rx, ry, s, d = 0;
-	for (s = n / 2; s > 0; s /= 2) {
-		rx = (x & s) > 0;
-		ry = (y & s) > 0;
-		d += s * s * ((3 * rx) ^ ry);
-		ht_rot(s, &x, &y, rx, ry);
-	}
-	return d;
-}
-
-//convert d to (x,y)
-__inline
-void d2xy(int n, int d, int* x, int* y) {
-	int rx, ry, s, t = d;
-	*x = *y = 0;
-	for (s = 1; s < n; s *= 2) {
-		rx = 1 & (t / 2);
-		ry = 1 & (t ^ rx);
-		ht_rot(s, x, y, rx, ry);
-		*x += s * rx;
-		*y += s * ry;
-		t /= 4;
-	}
-}
 
 /* Creates a complete CA_RULE struct by calculationg dynamic properties of prl */
 CA_RULE
@@ -2967,177 +2928,6 @@ CA_Rule(CA_RULE prl) {
 
 	/* Return result */
 	return prl;
-}
-
-
-/* Type for signed 32bit integer array */
-typedef struct
-S32IRS {
-	int32_t	ct;		/* count of elements */
-	int32_t* es;	/* elements */
-} S32IRS;
-
-/* Initializes S32IRS struct, ct must be valid count, es must be null or allocated mem */
-void
-init_S32IRS(S32IRS* p) {
-	/* Free previously allocated memory */
-	if (p->es)
-		free(p->es);
-	/* Allocate new memory */
-	p->es = malloc(p->ct * sizeof(*p->es));
-	/* Initialize memory */
-	for (int i = 0; i < p->ct; ++i)
-		p->es[i] = i;
-}
-/* Creates empty S32IRS struct, ct must be valid count
-ct	count
-*/
-S32IRS
-create_S32IRS(uint32_t ct) {
-	S32IRS r = { ct, NULL };
-	init_S32IRS(&r);
-	return r;
-}
-/* Print S32IRS struct
-mx		max items to print
-*/
-void
-print_S32IRS(S32IRS* p, int32_t mx) {
-	printf("s32irs\n");
-	for (int i = 0; i < mx && i < p->ct; ++i)
-		printf("%d ", p->es[i]);
-	printf("\n");
-}
-
-void
-print_M256I_I32(__m256i t) {
-	printf(
-		"m256i_i32   %d  %d  %d  %d  %d  %d  %d  %d\n",
-		t.m256i_i32[0], t.m256i_i32[1], t.m256i_i32[2], t.m256i_i32[3],
-		t.m256i_i32[4], t.m256i_i32[5], t.m256i_i32[6], t.m256i_i32[7]);
-}
-
-void
-test_simd_intrinsic() {
-	printf("test simd intrinsic\n");
-
-	const int SZ = 256;
-	UINT8* bts;
-	bts = _aligned_malloc(SZ + 2, 64);
-	for (int i = 0; i < SZ + 2; i++)
-		bts[i] = i;
-
-	register __m256i t;
-	t = _mm256_adds_epu8(*(__m256i*)(bts + 0), *(__m256i*)(bts + 1));
-	t = _mm256_adds_epu8(t, *(__m256i*)(bts + 2));
-
-	// for disasm tests
-	if (t.m256i_u8[27] == 99)
-		return;
-	if (t.m256i_u8[3] == 99)
-		return;
-
-	_mm256_store_si256(bts, t);
-
-	for (int i = 0; i < 32; i++)
-		printf("  %2d %d\n", i, bts[i]);
-
-	// test theoretical throughput
-	LONGLONG hptrc; // high performance timer counter
-	int64_t spct = 0; // sample count
-	//
-	const int32_t irsct = 8 * 256; // count of integers
-	int32_t* irs; // integers
-	irs = malloc((irsct + 2) * sizeof(*irs));
-	// Init
-	int32_t* i = irs;
-	int ii = 0;
-	for (; ii < irsct; ++i, ++ii)
-		*i = ii;
-	printf(
-		"init		0 %d  1 %d  2 %d\n",
-		irs[3], irs[1], irs[2]);
-
-	// integer
-	hptrc = timeit_start();
-	while (timeit_duration_nr(hptrc) < .1) {
-		spct += irsct * 1000;
-		for (int j = 0; j < 1000; j++)
-		{
-			int32_t* ip = irs, * ib = irs + irsct;
-		int_loop:
-			if (ip >= ib)
-				goto int_loop_end;
-			*ip = *ip + 3;
-			++ip;
-			goto int_loop;
-		int_loop_end:;
-		}
-	}
-	printf(
-		"init		0 %d  1 %d  2 %d\n",
-		irs[3], irs[1], irs[2]);
-	printf(
-		"integer		samples %.2e  speed %.2e	0 %d  1 %d  2 %d\n",
-		1.0 * spct, (double)spct / timeit_duration_nr(hptrc),
-		irs[3], irs[1], irs[2]);
-
-	// intrinsic
-	{
-		printf("Intrinsic\n");
-		// Init
-		int spct = 0;
-		S32IRS is = create_S32IRS(8 * 256);
-		LONGLONG hptrc = timeit_start();
-		print_S32IRS(&is, 8);
-		register __m256i ymm0 = *(__m256i*)is.es;
-
-		while (timeit_duration_nr(hptrc) < 0.1) {
-			spct += is.ct;
-			for (register int i = 0; i < is.ct; i += 8)
-				//	*(__m256i*)(is.es + i) = _mm256_add_epi32(*(__m256i*)(is.es + i), *(__m256i*)(is.es));
-				*(__m256i*)(is.es + i) = _mm256_add_epi32(*(__m256i*)(is.es + i), ymm0);
-		}
-		print_S32IRS(&is, 8);
-		printf(
-			"intrinsic	samples %.2e  speed %.2e\n",
-			1.0 * spct, spct / timeit_duration_nr(hptrc));
-	}
-	// intrinsic register
-	{
-		printf("IntrinsicR\n");
-		// Init
-		int spct = 0;
-		S32IRS is = create_S32IRS(8);
-		print_S32IRS(&is, 8);
-		//
-		LONGLONG hptrc = timeit_start();
-		register __m256i ymm0 = *(__m256i*)is.es;
-		register __m256i ymm1 = *(__m256i*)is.es;
-
-		print_M256I_I32(ymm0);
-
-		while (timeit_duration_nr(hptrc) < 0.1) {
-			spct += 1000000 * 8;
-			for (register int i = 0; i < 1000000; ++i)
-				ymm0 = _mm256_add_epi32(ymm0, ymm1);
-		};
-
-		_mm256_storeu_si256(is.es, ymm0);
-		print_S32IRS(&is, 8);
-
-		printf(
-			"intrinsicR	samples %.2e  speed %.2e\n",
-			1.0 * spct, spct / timeit_duration_nr(hptrc));
-		//
-		++ymm0.m256i_i32[3];
-		if (ymm0.m256i_i32[3] == 11)
-			printf("11");
-		//
-		printf("12");
-
-	}
-	//
 }
 
 
@@ -3212,6 +3002,7 @@ peano http://www.iti.fh-flensburg.de/lang/theor/lindenmayer-space-filling.htm
 sierpinski, penrose and more https://10klsystems.wordpress.com/examples/
 */
 
+// Lindenmeyer names
 enum LMS {
 	LMS_SIERPINSKI_SQUARE,
 	LMS_MOORE,
@@ -3226,8 +3017,9 @@ enum LMS {
 	LMS_TERADRAGON,
 	LMS_HILBERT,
 	LMS_COUNT
-};		// Lindenmeyer names
-int* LMSA[LMS_COUNT];											// Lindenmeyer arrays
+};
+// Lindenmeyer arrays
+int* LMSA[LMS_COUNT];
 
 /* Gosper */
 #define LMA -1
@@ -3376,8 +3168,8 @@ display_2d_lindenmeyer(
 	const UINT32* pbi,						// pixel-buffer first invalid element
 	const int lmsw,							// Lindenmeyer step width
 	int lmdh,								// Lindenmeyer depth - if < 0 it is calculated automatically
-	int* lmvs,								// Lindenmeyer needed screen size for given depth and plw - if not NULL no drawing is done, but size of Lindenmeyer system with given depth is calculated
-	int* lmhs,								// Lindenmeyer needed screen size for given depth and plw - if not NULL no drawing is done, but size of Lindenmeyer system with given depth is calculated
+	int* lmvs,								// Lindenmeyer needed vertical screen size for given depth and plw - if not NULL no drawing is done, but size of Lindenmeyer system with given depth is calculated
+	int* lmhs,								// Lindenmeyer needed horizontal screen size for given depth and plw - if not NULL no drawing is done, but size of Lindenmeyer system with given depth is calculated
 	int* lmpbsz								// Lindenmeyer pixel-buffer-size - i. e. nr of pixels needed to fill Lindenmeyer of given depth, calculated if lmsnsz is not NULL, see line above
 ) {
 	int rpnc = 0;							// pixel-screen cursor (relative, no pointer)
@@ -3401,9 +3193,10 @@ display_2d_lindenmeyer(
 		/* recalculate depth and size*/
 		if (ltlmdh < 0 || ltsnsz != pni - pnv || ltpbsz != pbi - pbv || ltlm != lm || ltvlpz != vlpz || lthlpz != hlpz) {
 			int dh = 0;						// depth iterator
-			int vs = 0;						// screen size
-			int hs = 0;						// screen size
+			int vs = 0;						// vertical screen size
+			int hs = 0;						// horizontal screen size
 			int pbsz = 0;					// pixel-buffer size
+			ltlmdh = LMMXDH - 1;
 			for (dh = 0; dh < LMMXDH; ++dh) {
 				display_2d_lindenmeyer(lm, NULL, NULL, 8192 * 4, 8192 * 4, vlpz, hlpz, pbv, pbi, lmsw, dh, &vs, &hs, &pbsz);
 				/* sufficient depth found */
@@ -3433,17 +3226,15 @@ display_2d_lindenmeyer(
 
 	int vlpzlw = vlpz * plw;				// pre-calc vlpz * plw
 	int avc = 0;							// angle-cursor
-	lmdh = min(lmdh, LMMXDH);				// make sure depth it within limits
-	int n = lmdh;							// current depth
 	int avs[8];								// angle movement vectors
 	const int alc = lm[0];					// angle count (4 = tetragonal, 6 = hexagonal)
 	// hexagonal
 	if (alc == LMH)
 		avs[0] = +sg * hlpz, avs[1] = +sg * plw * vlpz + hlpz, avs[2] = +sg * plw * vlpz - hlpz,
 		avs[3] = -sg * hlpz, avs[4] = -sg * plw * vlpz - hlpz, avs[5] = -sg * plw * vlpz + hlpz;
-	//avs[0] = -2*lw, avs[1] = -1*lw +2, avs[2] = +1*lw +2,
-	//avs[3] = +2*lw, avs[4] = +1*lw -2, avs[5] = -1*lw -2;
-// tetragonal
+		//avs[0] = -2*lw, avs[1] = -1*lw +2, avs[2] = +1*lw +2,
+		//avs[3] = +2*lw, avs[4] = +1*lw -2, avs[5] = -1*lw -2;
+	// tetragonal
 	else if (alc == LMT)
 		avs[0] = +sg * hlpz, avs[1] = +sg * plw * vlpz, avs[2] = -sg * hlpz, avs[3] = -sg * plw * vlpz;
 	// octagonal
@@ -3454,6 +3245,8 @@ display_2d_lindenmeyer(
 	int c;
 	int cc = 0;
 	int pns[LMMXDH];
+	lmdh = min(lmdh, LMMXDH - 1);			// make sure depth it within limits
+	int n = lmdh;							// current depth
 	pns[n] = 1;
 
 	int vsn = MAXINT, vsx = MININT, hsn = MAXINT, hsx = MININT;		// size min and max
@@ -3531,25 +3324,25 @@ display_2d_lindenmeyer(
 
 void
 display_2d_matze(
-	UINT32* pnv,										// pixel-screen first valid element
-	UINT32* pni,										// pixel-screen first invalid element
-	const int plw,										// pixel-screen line-width
-	const int paw,										// pixel-screen available with
-	const int vlpz,										// vertical-pixel-zoom
-	const int hlpz,										// horizontal-pixel-zoom
-	const UINT32* pbv,									// pixel-buffer first valid element
-	const UINT32* pbi,									// pixel-buffer first invalid element
-	const int md,										// mode - 0: line, 1: morton, 2: matze-fractal, 3: grid
-	const int mdpm										// mode parameter - may be used differently by different modes - morton: > 0 display mdpm - 1 layer of 3d morton-cube
+	UINT32* pnv,												// pixel-screen first valid element
+	UINT32* pni,												// pixel-screen first invalid element
+	const int plw,												// pixel-screen line-width
+	const int paw,												// pixel-screen available with
+	const int vlpz,												// vertical-pixel-zoom
+	const int hlpz,												// horizontal-pixel-zoom
+	const UINT32* pbv,											// pixel-buffer first valid element
+	const UINT32* pbi,											// pixel-buffer first invalid element
+	const int md,												// mode - 0: line, 1: morton, 2: matze-fractal, 3: grid
+	const int mdpm												// mode parameter - may be used differently by different modes - morton: > 0 display mdpm - 1 layer of 3d morton-cube
 ) {
-	const UINT32 pbs = pbi - pbv;						// pixel-buffer-size
-	UINT32* pbc = pbv;									// pixel-buffer cursor
+	const UINT32 pbs = pbi - pbv;								// pixel-buffer-size
+	UINT32* pbc = pbv;											// pixel-buffer cursor
 	double level = log2(pbi - pbv) / 2.0;
 	int ysz, xsz;
 	ysz = xsz = ipow(2, level);
 	if (md == 0 && mdpm) {
-		int ds = pow(pbs, 1.0 / 3.0) + 5;				// dimension-size
-		int hb = min(pow(pbs, 1.0 / 6.0) + 0.01, plw / ds - 1);		// horizontal-blocks
+		int ds = pow(pbs, 1.0 / 3.0) + 5;						// dimension-size
+		int hb = min(pow(pbs, 1.0 / 6.0) + 0.01, plw / ds - 1);	// horizontal-blocks
 		//printf("%e  %d\n", pow(pbs, 1.0 / 6.0), hb);
 		ysz = xsz = hb * ds;
 		ysz = (ds - 5) / hb * ds;
@@ -3563,20 +3356,20 @@ display_2d_matze(
 		if (fmod(level, 1.0) > 0.5)
 			ysz *= 2;
 	}
-	int h = (pni - pnv) / plw,							// height in plw-sized lines
+	int h = (pni - pnv) / plw,									// height in plw-sized lines
 		sy = h / 2 - ysz * vlpz / 2,
 		sx = paw / 2 - xsz * hlpz / 2,
-		cr = sy * plw + sx;								// transpose needed to center
-	int vlpzplw = vlpz * plw;							// pre-calc vlpz * plw
-	int rpnc = cr;										// pixel-screen position (relative, no pointer)
-	pni -= plw * (vlpz - 1) + (hlpz - 1);				// correct pixel-screen first invalid for pixel-zoom (so we dont have to check for every zoomed pixel)
+		cr = sy * plw + sx;										// transpose needed to center
+	int vlpzplw = vlpz * plw;									// pre-calc vlpz * plw
+	int rpnc = cr;												// pixel-screen position (relative, no pointer)
+	pni -= plw * (vlpz - 1) + (hlpz - 1);						// correct pixel-screen first invalid for pixel-zoom (so we dont have to check for every zoomed pixel)
 
 	// Linear-Memory-Layout
 	if (md == 0) {
 		int sz = ceil(sqrt(pbs));
 		for (int v = 0; v < sz * vlpzplw; v += vlpzplw)
 			for (int h = v; h < v + sz * hlpz; h += hlpz) {
-				UINT32* pnc = pnv + rpnc + h;								// pixel-screen current element
+				UINT32* pnc = pnv + rpnc + h;					// pixel-screen current element
 				if (pnc >= pnv && pnc < pni)
 					for (int vv = 0; vv < vlpzplw; vv += plw)
 						for (int hh = 0; hh < hlpz; ++hh)
@@ -4435,7 +4228,7 @@ if (cnmd == CM_HASH) {
 
 
 /* variant with other way to create patterned background (by using large numbers instead of arrays - seems
-to work and is probably much more efficient than using arrays, but becomes more defficult to handle when
+to work and is probably much more efficient than using arrays, but becomes more difficult to handle when
 larger patterns are needed */
 //void
 //CA_RandomizeSpace(
@@ -4532,55 +4325,9 @@ CA_RandomizeSpace(
 }
 
 
-void pixel_effect_hilbert(SIMFW* simfw) {
-	//gosper(simfw);
-
-	return;
-
-	// size & needed shift to center
-	int lw = simfw->sim_width;
-	int sz = min(simfw->sim_height, simfw->sim_width);
-	sz = log2(sz);
-	sz = ipow(2, sz);
-	printf("HILBERT\nsz  %d\n", sz);
-	int sttp = (simfw->sim_height - sz) / 2;			// shift from top
-	int stlt = (simfw->sim_width - sz) / 2;			// shift from left
-	int ar = sz * sz;
-
-	//
-	double lgmx, lgmx12, lf;
-	lf = 1e-0;
-	lgmx = log(ar * lf + 1);
-	lgmx12 = log(ar * lf / 2 + 1);
-	//
-	uint32_t* px = simfw->sim_canvas;
-	for (int i = 0; i < ar; ++i) {
-		int y, x;
-		d2xy(sz, i, &x, &y);
-		//MortonDecode2(i, &x, &y);
-		//y = i / sz, x = i %sz;
-		//printf("%d %d\t", y, x);
-		uint32_t col;
-		col = HSL_to_RGB_16b_2((MAXUINT32 / ar * i) >> 16, 0xFFFF, 0x8000);
-		col = 255.0 / ar * 2.0 * abs(i - ar / 2), col = col << 16 | col << 8 | col;
-
-		//col = i % 256, col = col << 16 | col << 8 | col;
-		col = 255.0 / lgmx12 * log(abs(i - ar / 2) * lf + 1), col = col << 16 | col << 8 | col;
-
-		px[y * lw + x + sttp * lw + stlt] = col;
-		//px = HSL_to_RGB_16b_2((MAXUINT32 / ar * i) >> 16, 0xFFFF, 0x8000);
-		//++px;
-	}
-
-
-}
-
-
-
 void
 CA_MAIN(void) {
 	init_lmas();								// init lindenmayer-arrays
-
 	srand((unsigned)time(NULL));
 	static pcg32_random_t pcgr;
 
@@ -4595,8 +4342,6 @@ CA_MAIN(void) {
 	printf("window  height %d  width %d\n", sfw.window_height, sfw.window_width);
 	printf("sim  height %d  width %d\n", sfw.sim_height, sfw.sim_width);
 	pixel_effect_moving_gradient(&sfw);
-	pixel_effect_hilbert(&sfw);
-	//sfw_test_rand(&sfw);
 
 	int ca_space_sz = 1 << 16;// sfw.sim_width * 1; // 256;
 	int rel_start_speed = 512;
@@ -5568,7 +5313,7 @@ CA_MAIN(void) {
 			sfw.sim_canvas,
 			sfw.sim_canvas + sfw.sim_height * sfw.sim_width,
 			de, cnmd, klrg, ds);
-		//			pixel_effect_moving_gradient(&sfw);
+		// pixel_effect_moving_gradient(&sfw);
 		tm += speed;
 
 		/* Update status */
