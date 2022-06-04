@@ -73,6 +73,7 @@ typedef struct caDisplaySettings {
 	int mdpm;										// mode-paramter (used by sfcm-modes)
 	int hddh;										// hash-display-depth
 	int hdll;										// hash-display-level
+	int mlsc;										// manual shift correction
 } caDisplaySettings;
 caDisplaySettings ds;								// display settings
 
@@ -3571,7 +3572,7 @@ lifeanddrawnewcleanzoom(
 	CA_RULE* cr,										// ca-rule configuration 
 	CA_CT* sc,											// space 
 	int scsz,											// space-size 
-	int64_t tm,											// time - nr. cells (tm=width=line=1=full generation) to live 
+	int64_t tm,											// time - nr of generations to evolve
 	int res,											// ca-space-reset-flag
 	int dyrt,											// display-reset-flag
 	UINT32* pnv,										// pixel-screen first valid element
@@ -3583,15 +3584,27 @@ lifeanddrawnewcleanzoom(
 )
 {
 	/* Abort if time is zero */
-	if (!tm)
+	if (tm <= 0)
 		return;
 
 	/* Check for maximum size of rule tables */
 	if (cr->nns > LV_MAXRLTLSZ) {
-		printf("ERROR max rule table size to small");
+		printf("ERROR max rule table size to small!");
 		return;
 	}
-
+	/* Check if computation-function is valid */
+	if (ca_cnsgs[cnmd].cnfn == NULL) {
+		printf("ERROR ca_cnfn is undefined  cnmd %d / %s!\n", cnmd, ca_cnsgs[cnmd].name);
+		return;
+	}
+	/* Warn if hash-computation-mode is used with inappropiate settings */
+	if (cnmd == CM_HASH && !ds.sfcm)
+		printf("WARNING you need to enable screen-filling-curve-mode when using hash-computation-mode!\n");
+	if (cnmd == CM_HASH && tm < scsz / 2)
+		printf("WARNING speed must at least be half of space-size when using hash-computation-mode!\n");
+	if (cnmd == CM_HASH && ((tm & (tm - 1)) != 0 || (scsz & (scsz - 1)) != 0))
+		printf("WARNING speed and size must be power of 2 when using hash-computation-mode!\n");
+	
 	/* Init vars and defines */
 	ds.lgm %= 2;
 	if (!ds.vlfs || !ds.hlfs)
@@ -3619,9 +3632,9 @@ lifeanddrawnewcleanzoom(
 	else
 		pbs /= ds.hlzm;
 	pbs = max(1, pbs);
-	const int stst = 0;									// state shiift (nr. of state bits shifted out / disregarded)
+	const int stst = 0;									// state shift (nr. of state bits shifted out / disregarded)
 
-	ds.vlzm = max(ds.vlzm, ds.vlfs);					// vertical zoom can not be larger than zomm since it not possible (atm) to go back to previous generatios=lines
+	ds.vlzm = max(ds.vlzm, ds.vlfs);					// vertical zoom can not be larger than zoom since it not possible (atm) to go back to previous generatios=lines
 	if (ds.vlfs == 0 || ds.hlfs == 0)
 		ds.hlfs = ds.vlfs = 1;
 
@@ -3633,10 +3646,7 @@ lifeanddrawnewcleanzoom(
 	brsz += 32;  
 	brsz = max(1024, brsz);
 
-	/* Clear screen on reset - do this before pnv is moved to center/align the image */
-	if (dyrt || res)
-		for (UINT32* tpnc = pnv; tpnc < pni; ++tpnc)
-			*tpnc = 0;
+
 
 	/* Scanline-mode initialization */
 	static UINT32* spnc = NULL;							// static pixel screen cursor; needed for scanline mode
@@ -3651,16 +3661,17 @@ lifeanddrawnewcleanzoom(
 	// scroll-mode (scanline-mode disabled)
 	else if (!ds.sm) {
 		/* Scroll pixel-screen to make room to draw tm pixels */
-		int64_t vlsl = tm / ds.vlzm * ds.vlpz;	// vertical scroll / lines to scroll
+		int64_t vlsl = tm / ds.vlzm * ds.vlpz;					// vertical scroll / lines to scroll
 		tm = vlsl * ds.vlzm / ds.vlpz;
-		int hlsl = 0;									// horizontal scroll
+///int hlsl = 1;											// horizontal scroll
+///hw = 0;
 		// horizontal scrolling is disabled atm since it does not work together with the histogram
 		// and is only possible when output-width and display-width are the same 
 		// if (pbs == plw)
 		//     hlsl = min(plw, (tm % (scsz * vlzm)) / max(1, vlzm * hlzm));				// horizontal scroll / nr. of pixels to scroll
 		if (vlsl * ds.plw < pni - pnv) {
 			pnc = max(pnv, pni - vlsl * ds.plw - hlsl);			// set cursor to first pixel that has to be drawn
-			scroll(pnv, (pni - pnv) * 4, -(pni - pnc) * 4);		// scroll is measured in nr of pixels > convert to argb-pixel with size of 4 byte
+			scroll(pnv, (pni - pnv) * 4, -4 * (pni - pnc));		// scroll is measured in nr of pixels > convert to argb-pixel with size of 4 byte
 		}
 		else
 			pnc = pnv;
@@ -3670,19 +3681,30 @@ lifeanddrawnewcleanzoom(
 		pnc = spnc;
 	}
 
+	/* Clear screen on reset */
+	if (dyrt || res) {
+		UINT32* tpnc;
+		if (!ds.sm)												// only clear area that will be drawn to and leave scrolled away area intact when in scroll-mode
+			tpnc = pnc;
+		else													// clear whole screen when in scanline-mode or screen-filling-curve-mode
+			tpnc = pnv;
+		for (; tpnc < pni; ++tpnc)
+			*tpnc = 0;
+	}
+
 	/* Init pixel-buffer */
-	static UINT32* pbv = NULL;							// pixel-buffer first valid element
-	static UINT32* pbi = NULL;							// pixel-buffer first invalid element
-	static UINT32* pbc = NULL;							// pixel-buffer cursor / current element
+	static UINT32* pbv = NULL;									// pixel-buffer first valid element
+	static UINT32* pbi = NULL;									// pixel-buffer first invalid element
+	static UINT32* pbc = NULL;									// pixel-buffer cursor / current element
 	if (!pbv || last_pbs != pbs || dyrt) {
 		_aligned_free(pbv);
 		pbv = _aligned_malloc(pbs * sizeof * pbv, BYAL);
 		pbc = pbi = pbv + pbs;
 	}
 	/* Init cell-space-buffer */
-	static CA_CT* csv = NULL;							// cell-array first valid element
-	static CA_CT* csi = NULL;							// cell-array first invalid element
-	static CA_CT* csf = NULL;							// position of first cell, corrected for shifting
+	static CA_CT* csv = NULL;									// cell-array first valid element
+	static CA_CT* csi = NULL;									// cell-array first invalid element
+	static CA_CT* csf = NULL;									// position of first cell, corrected for shifting
 	if (!csv || res) {
 		_aligned_free(csv);
 		csf = csv = _aligned_malloc((scsz + brsz) * sizeof * csv, BYAL);
@@ -3690,12 +3712,12 @@ lifeanddrawnewcleanzoom(
 		memcpy(csv, sc, scsz * sizeof * csv);
 	}
 	/* Init testing-cell-space-buffer */
-	static CA_CT* tcsv = NULL;							// test-cell-array first valid element
+	static CA_CT* tcsv = NULL;									// test-cell-array first valid element
 // temporary code for debugging
 static caBitArray tvba = { .v = NULL, .rc = 0, .rw = 0, .clsc = NULL, .ct = 0, .lc = 0, .lw = 0, .mmwn = 0, .oc = 0, .scsz = 0 };				// row-first/vertical-bit-array
 // end temporary code
 	if (ds.tm == 2) {
-		_aligned_free(tcsv);							// aligned memory management may be necesary for use of some intrinsic or opencl functions
+		_aligned_free(tcsv);									// aligned memory management may be necesary for use of some intrinsic or opencl functions
 		tcsv = _aligned_malloc((scsz + cr->ncn - 1) * sizeof * tcsv, BYAL);
 		memcpy(tcsv, csv, scsz * sizeof * tcsv);
 // temporary code for debugging
@@ -3749,16 +3771,16 @@ if (cnmd == CM_HASH) {
 	default:
 		dyss = 0;
 	}
-	static UINT32* cltbl = NULL;						// color table
+	static UINT32* cltbl = NULL;							// color table
 	if (dyss && (!cltbl || dyrt)) {
 		free(cltbl);
 		cltbl = malloc(dyss * sizeof * cltbl);
 	}
 
 	/* Init state count table */
-	static UINT32* sctbl = NULL;						// state count table
-	static double* dsctbl = NULL;						// double state count table
-	static double* tdsctbl = NULL;						// temp double state count table
+	static UINT32* sctbl = NULL;							// state count table
+	static double* dsctbl = NULL;							// double state count table
+	static double* tdsctbl = NULL;							// temp double state count table
 	if (!sctbl || dyrt) {
 		free(sctbl);
 		sctbl = malloc(dyss * sizeof * sctbl);
@@ -3768,8 +3790,8 @@ if (cnmd == CM_HASH) {
 		tdsctbl = malloc(dyss * sizeof * tdsctbl);
 	}
 	//
-	static double* spt = NULL;							// state position table		
-	static double* svt = NULL;							// state velocity table
+	static double* spt = NULL;								// state position table		
+	static double* svt = NULL;								// state velocity table
 	static int ltdyss = 0;
 	if (ltdyss != dyss) {
 		ltdyss = dyss;
@@ -3782,10 +3804,10 @@ if (cnmd == CM_HASH) {
 	}
 
 	/* */
-	double dmn;											// double min
-	double dmx;											// double max
+	double dmn;												// double min
+	double dmx;												// double max
 
-	int64_t otm = tm;									// original time
+	int64_t otm = tm;										// original time
 
 	while (1) {
 		/* DISPLAY - Copy as much pixels as possible from the pixel-buffer to the pixel-screen.
@@ -3853,7 +3875,7 @@ if (cnmd == CM_HASH) {
 		if (tm < 1)
 			break;
 
-		/* ONE line */
+		/* EVOLVE - Calculate next generation(s) of CA */
 		for (int vlp = 0; vlp < ds.vlzm; ++vlp) {
 			/* Copy cells of wrap behind buffer (last cells in line) */
 			memcpy(csv + scsz, csv, brsz * sizeof * csv);
@@ -3874,18 +3896,12 @@ if (cnmd == CM_HASH) {
 				ognc = min(ognc, 1);
 			gnc = ognc;
 			// run selected computation function
-			if (ca_cnsgs[cnmd].cnfn != NULL) {
-				//printf("CA_CNFN %s  GNC %d", ca_cnsgs[cnmd].name, gnc);
-				gnc = (ca_cnsgs[cnmd].cnfn)(gnc, &vba);
-			}
-			else {
-				printf("CA_CNFN  UNDEFINED  cnmd %d / %s\n", cnmd, ca_cnsgs[cnmd].name);
-				gnc = 0;
-			}
+			//printf("CA_CNFN %s  GNC %d", ca_cnsgs[cnmd].name, gnc);
+			gnc = (ca_cnsgs[cnmd].cnfn)(gnc, &vba);
 			//
 //printf("/ %d   tm %u   de %d   scsz %d   brsz %d\n", gnc, tm, de, scsz, brsz);
 			tm -= (ognc - gnc);											// adjust time
-			csf -= ((ognc - gnc) * (cr->ncn / 2)) % scsz;				// correct for shift
+			csf -= ((ognc - gnc) * (cr->ncn / 2) + ds.mlsc) % scsz;		// correct for shift
 			if (csf < csv)
 				csf += scsz;
 			if (csf >= csi)
@@ -4229,7 +4245,9 @@ if (cnmd == CM_HASH) {
 
 /* variant with other way to create patterned background (by using large numbers instead of arrays - seems
 to work and is probably much more efficient than using arrays, but becomes more difficult to handle when
-larger patterns are needed */
+larger patterns are needed 
+ALSO is probably a good way to make it possible to enumerate the background patterns and store/load this setting
+*/
 //void
 //CA_RandomizeSpace(
 //	CA_CT *spc,
@@ -4376,6 +4394,7 @@ CA_MAIN(void) {
 	ds.mdpm = 0;
 	ds.hddh = -1;
 	ds.hdll = 0;
+	ds.mlsc = 0;
 
 	uint64_t tm = 0;			/* time */
 
@@ -4599,10 +4618,10 @@ CA_MAIN(void) {
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
-		nkb.name = "hash-display-level";
-		nkb.val = &ds.hdll; nkb.cgfg = &dyrt;
-		nkb.slct_key = SDLK_u;
-		nkb.min = 0; nkb.max = 128; nkb.wpad = 0;
+		nkb.name = "manual-shift-correction";
+		nkb.val = &ds.mlsc;
+		nkb.slct_key = SDLK_F10;
+		nkb.min = -(1<<30); nkb.max = 1<<30; nkb.wpad = 0;
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
@@ -5250,11 +5269,12 @@ CA_MAIN(void) {
 				if (fscd)
 					dyrt = 1;
 
+				/* CA-space-size has been changed */
 				if (ca_space_sz != last_ca_space_sz) {
 					printf("ca-space-resize  new %d  old %d\n", ca_space_sz, last_ca_space_sz);
 					int nwsz = ca_space_sz;
 					CA_CT* nwsc = NULL;									// new space
-					nwsc = malloc(nwsz * sizeof * nwsc);					// memory allocation for new space
+					nwsc = malloc(nwsz * sizeof * nwsc);				// memory allocation for new space
 					for (int i = 0; i < nwsz; ++i)						// init new space to 0
 						nwsc[i] = 0;
 					tm = 0;
@@ -5269,8 +5289,7 @@ CA_MAIN(void) {
 
 					speed = speed * 1.0 * nwsz / last_ca_space_sz;
 
-					ca_space_sz = nwsz;									// remember new size
-					last_ca_space_sz = ca_space_sz;
+					ca_space_sz = last_ca_space_sz = nwsz;				// remember new size
 					ca_space = nwsc;									// set new space as current
 					res = 1;
 				}
@@ -5292,15 +5311,6 @@ CA_MAIN(void) {
 				x_shift += sfw.sim_width;
 			if (x_shift != 0 && speed < sfw.sim_height)
 				speed = sfw.sim_height;
-		}
-
-		/* Manipulate simulation canvas pixels */
-		UINT32* ll = sfw.sim_canvas;
-
-		/* Scroll */
-		speed = max(speed, 0);
-		if (speed <= sfw.sim_height) {
-			ll = sfw.sim_canvas + (sfw.sim_height * sfw.sim_width) - speed * sfw.sim_height; /* pos to start drawing */
 		}
 
 		ds.plw = sfw.sim_width;
@@ -5330,12 +5340,14 @@ CA_MAIN(void) {
 		static uint64_t fpstm = 0;
 		double trdn = timeit_duration_nr(fpstr);		// fps-timer-duration
 		if (trdn >= 1.0) {
-			HC_print_stats(1);
-			for (int i = 0; i < HCTMXLV - 2; i++) {
-				hc_stats[i].fc = 0;
-				hc_stats[i].rqct = 0;
-				hc_stats[i].sc = 0;
-				hc_stats[i].ss = 0;
+			if (cnmd == CM_HASH) {
+				HC_print_stats(1);
+				for (int i = 0; i < HCTMXLV - 2; i++) {
+					hc_stats[i].fc = 0;
+					hc_stats[i].rqct = 0;
+					hc_stats[i].sc = 0;
+					hc_stats[i].ss = 0;
+				}
 			}
 			printf("cnmd %s  sz %.2e  sd %.2e  cs %.2e  tm %.2e\n",
 				ca_cnsgs[cnmd].name,

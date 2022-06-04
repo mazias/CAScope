@@ -169,25 +169,25 @@ SIMFW_GetMouseState(SIMFW *sfw, int *y, int *x) {
 /* Displays all key bindings */
 void
 SIMFW_DisplayKeyBindings(SIMFW *sfw) {
-	char help[100000] = "";
-	char line[10000] = "";
-	char vals[100] = "";
-
+	char val[100] = "";
+	char buffer[16000] = "";
+	int j = 0;												// nr. of byte written to buffer
 
 	SIMFW_KeyBinding *kb = sfw->key_bindings;
 	while (kb < sfw->key_bindings + sfw->key_bindings_count) {
-		if (kb->val_type == KBVT_INT)
-			sprintf_s(vals, sizeof(vals), "%5d", *(int*)kb->val);
+		if (kb->value_strings != NULL)
+			sprintf_s(val, sizeof(val), "%s", kb->value_strings[*(int*)kb->val]);
+		else if (kb->val_type == KBVT_INT)
+			sprintf_s(val, sizeof(val), "%5d", *(int*)kb->val);
 		else if (kb->val_type == KBVT_DOUBLE)
-			sprintf_s(vals, sizeof(vals), "%.3f", *(double*)kb->val);
-		sprintf_s(line, sizeof(line), "% 4s %s %s %s\n", SDL_GetKeyName(kb->slct_key), vals, kb->name, kb->description);
-		printf("%s", line);
-		strcat_s(help, sizeof(help), line);
+			sprintf_s(val, sizeof(val), "%.3f", *(double*)kb->val);
+		j += sprintf_s(buffer + j, sizeof(buffer) - j, "% 4s % 8s  %s %s\n", SDL_GetKeyName(kb->slct_key), val, kb->name, kb->description);
 		kb++;
 
 	}
+	printf("%s", buffer);
 
-	SIMFW_SetFlushMsg(sfw, help);
+	SIMFW_SetFlushMsg(sfw, buffer);
 }
 
 
