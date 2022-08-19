@@ -43,11 +43,11 @@ The dependencies are:
 
 The path to the dependencies is currently provided relative to the CAScope directory as `../_INCLUDES/`. So you should put your dependencies there.
 
-### OpenCL Support **
+### OpenCL Support
   OpenCL is currently only used in some experimental code blocks and does not give you any additional features or speed. So you only need to enable it, if you want to do OpenCL developement.
   To enable or disable OpenCL look for `#define CL_ENABLE` in `ca.c`. Also make sure you select the corresponding build/solution configuration.
   If you have issues regarding the use of OpenCL V. 1.2, have a look here: https://stackoverflow.com/questions/28500496/opencl-function-found-deprecated-by-visual-studio
-- OpenCL - https://www.khronos.org/opencl/ - \
+- OpenCL - https://www.khronos.org/opencl/
 
 ## Usage
 CAScope can only be controlled by the keyboard.
