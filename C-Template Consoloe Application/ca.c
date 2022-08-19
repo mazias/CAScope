@@ -1,15 +1,15 @@
 ﻿
 // rule 1507 und 1146 in stzm 1 schön
 
-#include "stdafx.h"		// default includes (precompiled headers)
-#include "simfw.h"
-#include "color.h"
+#include "stdafx.h"							// default includes (precompiled headers)
+#include "simfw.h"							// simulation framework library (abstracts SDL2)
+#include "color.h"							// color functions
 #include "float.h"
-#include "hp_timer.h"
-#include "pcg_basic.h"			// Random Number Library
+#include "hp_timer.h"						// high performance timing functions
+#include "pcg_basic.h"						// random number generator library
 
 #include "math.h"
-#define M_E        2.71828182845904523536   // e
+#define M_E        2.71828182845904523536   // Euler's number
 
 // Return a random double value in the range [0, 1)
 __inline double random01() {
@@ -17,9 +17,12 @@ __inline double random01() {
 }
 
 /* OpenCL */
+//#define ENABLE_CL 1
 // to enable OpenCL also include OpenCL headers in Settings > Compiler > Additional Include Directories and the lib file in Settings > Linker > Additional Dependencies / Zusätzliche Abhängigkeiten
-#define CL_USE_DEPRECATED_OPENCL_1_2_APIS // https://stackoverflow.com/questions/28500496/opencl-function-found-deprecated-by-visual-studio
-#include <CL/cl.h>
+#ifdef ENABLE_CL 
+	#define CL_USE_DEPRECATED_OPENCL_1_2_APIS // https://stackoverflow.com/questions/28500496/opencl-function-found-deprecated-by-visual-studio
+	#include <CL/cl.h>
+#endif
 
 #define SIMFW_TEST_TITLE	"ZELLOSKOP"
 #define SIMFW_FONTSIZE			12
@@ -44,6 +47,9 @@ __inline double random01() {
 typedef UINT8 CA_CT; /* memory-type of a cell */
 //typedef cl_uchar CA_CT; /* memory-type of a cell */
 //typedef int CA_CT; /* memory-type of a cell */
+
+int sdmrpt;										// speed-multiplicator-as-power-of-two - 1 means ca runs with speed of half its size (speed=(size/2)*2^(sdmrpt-1)) 
+
 
 typedef struct caDisplaySettings {
 	int fsme;										// focus-mode - 0: absolute, 1: totalistic, 2: frequency - only in hash computing mode
@@ -114,7 +120,7 @@ typedef struct caBitArray {
 	CA_CT* clsc;									// cell-space - original cell-space-array
 	int scsz;										// original space-size
 	int brsz;										// original border-size
-	CA_RULE* cr;									// ca-rule configuration 
+	CA_RULE* cr;									// ca-rule configuration 	
 } caBitArray;
 
 __inline
@@ -361,504 +367,506 @@ void print_bits(unsigned char* bytes, size_t num_bytes, int bypr) {
 	printf("]\n");
 }
 
-// **********************************************************************************************************************************
-/* OpenCL */
-// *********************************************************************************************************************************
-// OCL Declarations *****************************************************************************************************************
-// **********************************************************************************************************************************
-#define OCL_CHECK_ERROR(error) { \
-    if ((error) != CL_SUCCESS) fprintf (stderr, "OpenCL error <%s:%i>: %s\n", __FILE__, __LINE__, ocl_strerr((error))); }
+#ifdef ENABLE_CL 
+	// **********************************************************************************************************************************
+	// OpenCL
+	// *********************************************************************************************************************************
+	// OCL Declarations *****************************************************************************************************************
+	// **********************************************************************************************************************************
+	#define OCL_CHECK_ERROR(error) { \
+		if ((error) != CL_SUCCESS) fprintf (stderr, "OpenCL error <%s:%i>: %s\n", __FILE__, __LINE__, ocl_strerr((error))); }
 
-static const char* opencl_error_msgs[] = {
-	"CL_SUCCESS",
-	"CL_DEVICE_NOT_FOUND",
-	"CL_DEVICE_NOT_AVAILABLE",
-	"CL_COMPILER_NOT_AVAILABLE",
-	"CL_MEM_OBJECT_ALLOCATION_FAILURE",
-	"CL_OUT_OF_RESOURCES",
-	"CL_OUT_OF_HOST_MEMORY",
-	"CL_PROFILING_INFO_NOT_AVAILABLE",
-	"CL_MEM_COPY_OVERLAP",
-	"CL_IMAGE_FORMAT_MISMATCH",
-	"CL_IMAGE_FORMAT_NOT_SUPPORTED",
-	"CL_BUILD_PROGRAM_FAILURE",
-	"CL_MAP_FAILURE",
-	"CL_MISALIGNED_SUB_BUFFER_OFFSET",
-	"CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST",
-	/* next IDs start at 30! */
-	"CL_INVALID_VALUE",
-	"CL_INVALID_DEVICE_TYPE",
-	"CL_INVALID_PLATFORM",
-	"CL_INVALID_DEVICE",
-	"CL_INVALID_CONTEXT",
-	"CL_INVALID_QUEUE_PROPERTIES",
-	"CL_INVALID_COMMAND_QUEUE",
-	"CL_INVALID_HOST_PTR",
-	"CL_INVALID_MEM_OBJECT",
-	"CL_INVALID_IMAGE_FORMAT_DESCRIPTOR",
-	"CL_INVALID_IMAGE_SIZE",
-	"CL_INVALID_SAMPLER",
-	"CL_INVALID_BINARY",
-	"CL_INVALID_BUILD_OPTIONS",
-	"CL_INVALID_PROGRAM",
-	"CL_INVALID_PROGRAM_EXECUTABLE",
-	"CL_INVALID_KERNEL_NAME",
-	"CL_INVALID_KERNEL_DEFINITION",
-	"CL_INVALID_KERNEL",
-	"CL_INVALID_ARG_INDEX",
-	"CL_INVALID_ARG_VALUE",
-	"CL_INVALID_ARG_SIZE",
-	"CL_INVALID_KERNEL_ARGS",
-	"CL_INVALID_WORK_DIMENSION",
-	"CL_INVALID_WORK_GROUP_SIZE",
-	"CL_INVALID_WORK_ITEM_SIZE",
-	"CL_INVALID_GLOBAL_OFFSET",
-	"CL_INVALID_EVENT_WAIT_LIST",
-	"CL_INVALID_EVENT",
-	"CL_INVALID_OPERATION",
-	"CL_INVALID_GL_OBJECT",
-	"CL_INVALID_BUFFER_SIZE",
-	"CL_INVALID_MIP_LEVEL",
-	"CL_INVALID_GLOBAL_WORK_SIZE"
-};
-const char*
-ocl_strerr(int error)
-{
-	int index = 0;
-
-	if (error >= -14)
-		index = -error;
-	else if (error <= -30 && error >= -64)
-		index = -error - 15;
-
-	return opencl_error_msgs[index];
-}
-
-
-typedef struct OCLCA {
-	cl_int				success;
-	cl_context			context;
-	cl_command_queue	command_queue;
-	cl_kernel			kernel_ca_next_gen;
-	cl_kernel			kernel_ca_next_gen_tot_ncn3;
-	cl_kernel			kernel_ca_next_gen_abs_ncn3_ncs2;
-	cl_kernel			kernel_ca_next_gen_range_tot_ncn3;
-	cl_kernel			kernel_ca_next_gen_vba;
-} OCLCA;
-// **********************************************************************************************************************************
-// OCL Functions ********************************************************************************************************************
-// **********************************************************************************************************************************
-// returns valid opencl kernel object
-#define CL_MAX_PLATFORM_COUNT (4)
-#define CL_MAX_DEVICE_COUNT (4)
-OCLCA
-OCLCA_Init(
-	const char* cl_filename
-) {
-	OCLCA result;
-	result.command_queue = NULL;
-	result.context = NULL;
-	result.kernel_ca_next_gen = NULL;
-	result.kernel_ca_next_gen_tot_ncn3 = NULL;
-	result.kernel_ca_next_gen_abs_ncn3_ncs2 = NULL;
-	result.kernel_ca_next_gen_range_tot_ncn3 = NULL;
-	result.success = CL_SUCCESS;
-
-	//return result;
-
-		////////// BEGIN SETUP GPU COMMUNICATION
-
-
-		// Find the first GPU device
-	cl_int cl_errcode_ret;				// used to retrieve opencl error codes
-	cl_device_id selected_device = 0;
-
-	cl_uint platform_count = 0;
-	clGetPlatformIDs(0, NULL, &platform_count);
-	cl_platform_id platform_ids[CL_MAX_PLATFORM_COUNT];
-	clGetPlatformIDs(CL_MAX_PLATFORM_COUNT, platform_ids, &platform_count);
-
-	/* Macros to help display device infos */
-#define OCL_PRINT_DEVICE_INFO_STRING(cl_device_info) { \
-    OCL_CHECK_ERROR(clGetDeviceInfo(device, cl_device_info, sizeof(string1024), &string1024, NULL)); \
-	printf("clGetDeviceInfo %-40s %s\n", #cl_device_info, string1024); }
-#define OCL_PRINT_DEVICE_INFO_UINT(cl_device_info) { \
-    OCL_CHECK_ERROR(clGetDeviceInfo(device, cl_device_info, sizeof(rt_cl_uint), &rt_cl_uint, NULL)); \
-	printf("clGetDeviceInfo %-40s %u\n", #cl_device_info, rt_cl_uint); }
-	/* */
-	char string1024[1024];
-	cl_uint rt_cl_uint;
-	for (int pi = 0; pi < platform_count; pi++) {
-		cl_platform_id platform_id = platform_ids[pi];
-
-		cl_uint device_count = 0;
-		clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, 0, NULL, &device_count);
-		cl_device_id device_ids[CL_MAX_DEVICE_COUNT];
-		clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, CL_MAX_DEVICE_COUNT, device_ids, &device_count);
-
-		fprintf(stderr, "SUC platform found  platform count %d  platform #%d  device count %d  device id #0 %d%d\n",
-			platform_count, pi, device_count, device_ids[0]);
-
-		for (int i = 0; i < device_count; i++) {
-			cl_device_id device = device_ids[i];
-			OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_NAME)
-				OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_VENDOR)
-				OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_VERSION)
-				OCL_PRINT_DEVICE_INFO_STRING(CL_DRIVER_VERSION)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_ADDRESS_BITS)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_MAX_CLOCK_FREQUENCY)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_MAX_COMPUTE_UNITS)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_LONG)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_FLOAT)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_CHAR)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_SHORT)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_INT)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_LONG)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_FLOAT)
-				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_DOUBLE)
-				//OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_EXTENSIONS)
-
-				if (pi == 0) {
-					selected_device = device;
-					printf("SELECTED\n");
-				}
-		}
-	}
-
-	if (!selected_device) {
-		fprintf(stderr, "ERR failed to find any OpenCL GPU device. Sorry.\n");
-		result.success = selected_device;
-		return result;
-	}
-
-	// clCreateContext
-	cl_context context = clCreateContext(NULL, 1, &selected_device, NULL, NULL, &cl_errcode_ret);
-	OCL_CHECK_ERROR(cl_errcode_ret);
-	// clCreateCommandQueue
-	cl_command_queue command_queue = clCreateCommandQueue(context, selected_device, 0, &cl_errcode_ret);
-	if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clCreateCommandQueue @0x%x\n", command_queue);
-	else									printf("ERR clCreateCommandQueue failed with error code %d\n", cl_errcode_ret);
-	// clCreateProgramWithSource
-	const char* program_code = read_file(cl_filename);
-	cl_program program = clCreateProgramWithSource(context, 1, (const char* []) { program_code }, NULL, & cl_errcode_ret);
-	if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clCreateProgramWithSource @0x%x\n", program);
-	else									printf("ERR clCreateProgramWithSource failed with error code %d\n", cl_errcode_ret);
-	// clBuildProgram
-	cl_errcode_ret = clBuildProgram(program, 0, NULL, "", NULL, NULL);
-	if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clBuildProgram\n");
-	if (cl_errcode_ret != CL_SUCCESS) {
-		printf("ERR clBuildProgram failed with error code %d\n", cl_errcode_ret);
-		char compiler_log[4096] = "EMPTY\0";
-		clGetProgramBuildInfo(program, selected_device, CL_PROGRAM_BUILD_LOG, sizeof(compiler_log), compiler_log, NULL);
-		printf("    error log\n%s\n", compiler_log);
-		result.success = cl_errcode_ret;
-		return result;
-	}
-	// clCreateKernel
-	////result.kernel_ca_next_gen = clCreateKernel(program, "ca_next_gen", &cl_errcode_ret);
-	////OCL_CHECK_ERROR(cl_errcode_ret)
-	////result.kernel_ca_next_gen_tot_ncn3 = clCreateKernel(program, "ca_next_gen_tot_ncn3", &cl_errcode_ret);
-	////OCL_CHECK_ERROR(cl_errcode_ret)
-	////result.kernel_ca_next_gen_abs_ncn3_ncs2 = clCreateKernel(program, "ca_next_gen_abs_ncn3_ncs2", &cl_errcode_ret);
-	////OCL_CHECK_ERROR(cl_errcode_ret)	
-	////result.kernel_ca_next_gen_range_tot_ncn3 = clCreateKernel(program, "ca_next_gen_range_tot_ncn3", &cl_errcode_ret);
-	////OCL_CHECK_ERROR(cl_errcode_ret)
-	result.kernel_ca_next_gen_vba = clCreateKernel(program, "ca_next_gen_vba", &cl_errcode_ret);
-	OCL_CHECK_ERROR(cl_errcode_ret)
-		// get some kernel info
+	static const char* opencl_error_msgs[] = {
+		"CL_SUCCESS",
+		"CL_DEVICE_NOT_FOUND",
+		"CL_DEVICE_NOT_AVAILABLE",
+		"CL_COMPILER_NOT_AVAILABLE",
+		"CL_MEM_OBJECT_ALLOCATION_FAILURE",
+		"CL_OUT_OF_RESOURCES",
+		"CL_OUT_OF_HOST_MEMORY",
+		"CL_PROFILING_INFO_NOT_AVAILABLE",
+		"CL_MEM_COPY_OVERLAP",
+		"CL_IMAGE_FORMAT_MISMATCH",
+		"CL_IMAGE_FORMAT_NOT_SUPPORTED",
+		"CL_BUILD_PROGRAM_FAILURE",
+		"CL_MAP_FAILURE",
+		"CL_MISALIGNED_SUB_BUFFER_OFFSET",
+		"CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST",
+		/* next IDs start at 30! */
+		"CL_INVALID_VALUE",
+		"CL_INVALID_DEVICE_TYPE",
+		"CL_INVALID_PLATFORM",
+		"CL_INVALID_DEVICE",
+		"CL_INVALID_CONTEXT",
+		"CL_INVALID_QUEUE_PROPERTIES",
+		"CL_INVALID_COMMAND_QUEUE",
+		"CL_INVALID_HOST_PTR",
+		"CL_INVALID_MEM_OBJECT",
+		"CL_INVALID_IMAGE_FORMAT_DESCRIPTOR",
+		"CL_INVALID_IMAGE_SIZE",
+		"CL_INVALID_SAMPLER",
+		"CL_INVALID_BINARY",
+		"CL_INVALID_BUILD_OPTIONS",
+		"CL_INVALID_PROGRAM",
+		"CL_INVALID_PROGRAM_EXECUTABLE",
+		"CL_INVALID_KERNEL_NAME",
+		"CL_INVALID_KERNEL_DEFINITION",
+		"CL_INVALID_KERNEL",
+		"CL_INVALID_ARG_INDEX",
+		"CL_INVALID_ARG_VALUE",
+		"CL_INVALID_ARG_SIZE",
+		"CL_INVALID_KERNEL_ARGS",
+		"CL_INVALID_WORK_DIMENSION",
+		"CL_INVALID_WORK_GROUP_SIZE",
+		"CL_INVALID_WORK_ITEM_SIZE",
+		"CL_INVALID_GLOBAL_OFFSET",
+		"CL_INVALID_EVENT_WAIT_LIST",
+		"CL_INVALID_EVENT",
+		"CL_INVALID_OPERATION",
+		"CL_INVALID_GL_OBJECT",
+		"CL_INVALID_BUFFER_SIZE",
+		"CL_INVALID_MIP_LEVEL",
+		"CL_INVALID_GLOBAL_WORK_SIZE"
+	};
+	const char*
+	ocl_strerr(int error)
 	{
-		cl_kernel kernel = result.kernel_ca_next_gen_vba;
-		size_t kwgs = 0;
-		OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_WORK_GROUP_SIZE, sizeof(kwgs), &kwgs, NULL));
-		printf("CL_KERNEL_WORK_GROUP_SIZE %u\n", kwgs);
-		size_t pwgsm = 0;
-		OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE, sizeof(pwgsm), &pwgsm, NULL));
-		printf("CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE %u\n", pwgsm);
-		cl_ulong pms = 0;
-		OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_PRIVATE_MEM_SIZE, sizeof(pms), &pms, NULL));
-		printf("CL_KERNEL_PRIVATE_MEM_SIZE %u\n", pms);
-		cl_ulong lms = 0;
-		OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_LOCAL_MEM_SIZE, sizeof(lms), &lms, NULL));
-		printf("CL_KERNEL_LOCAL_MEM_SIZE %u\n", pms);
-	}
-	//
-	result.context = context;
-	result.command_queue = command_queue;
+		int index = 0;
 
-	// cleanup
-	//clReleaseProgram(program);
-	//clReleaseCommandQueue(command_queue);
-	//clReleaseContext(context);
+		if (error >= -14)
+			index = -error;
+		else if (error <= -30 && error >= -64)
+			index = -error - 15;
 
-	return result;
-}
-//**********************************************************************************************************************************
-/* Calculate next generation OpenCL   flexible variant - can handle totalistic and absolute rules by use of multiplication table */
-void OCLCA_Run(
-	int ng,					// nr of generations
-	int res,				// reset flag, is 1 if anything changes
-	OCLCA oclca,
-	CA_RULE* cr,
-	int sync_memory,
-	const CA_CT* clv,		// cell-line first valid element - this array must include brd > size must ne spsz + brd
-	const int scsz,			// space-size
-	const int brsz,			// border-size
-	cl_uint rg)		// range per kernel
-{
-	rg = max(1, rg);
-
-	cl_int cl_errcode_ret;	// used to retrieve opencl error codes
-
-	// define how many kernels run in parallel
-	cl_uint work_dim = 1;
-	cl_uint gws[1];		// global work size
-	cl_uint lws[1];		// local work size
-
-	///printf("clv %x  scsz %d  gws[0] %u  klrg %u\n", clv, scsz, gws[0], rg);
-
-	// create host to device memory bindings and transfer memory from host to device
-	static cl_mem b_cli = NULL;			// opencl binding for cell-line
-	static cl_mem b_clo = NULL;			// opencl binding for cell-line
-	static cl_mem b_clsz = NULL;			// opencl binding for cell-line-size
-	static cl_mem b_ncn = NULL;			// opencl binding for ncn
-	static cl_mem b_rltl = NULL;			// opencl binding for 
-	static cl_mem b_mntl = NULL;			// opencl binding for
-	static cl_mem b_rg = NULL;			// opencl binding for
-	static int clfp = 0;			// cell-line flip to switch between cli and clo
-	/* Init device memory and host-device-memory-bindings and kernel arguments */
-	if (1 || sync_memory || res || b_cli == NULL) {
-		//printf("opencl_ca memory reset\n");
-		sync_memory = 1;
-		clfp = 1;
-		// clean up
-		if (b_cli != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_cli));
-		if (b_clo != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_clo));
-		if (b_ncn != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_ncn));
-		if (b_rltl != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_rltl));
-		if (b_mntl != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_mntl));
-		if (b_rg != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_rg));
-		// cli
-		b_cli = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, (scsz + brsz) * sizeof(*clv), clv, &cl_errcode_ret);
-		OCL_CHECK_ERROR(cl_errcode_ret);
-		// clo
-		b_clo = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE, (scsz + brsz) * sizeof(*clv), NULL, &cl_errcode_ret);
-		OCL_CHECK_ERROR(cl_errcode_ret);
-		// ncn
-		b_ncn = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->ncn), &cr->ncn, &cl_errcode_ret);
-		OCL_CHECK_ERROR(cl_errcode_ret);
-		// rule-table
-		b_rltl = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->rltl[0]) * cr->nns, &cr->rltl[0], &cl_errcode_ret);
-		OCL_CHECK_ERROR(cl_errcode_ret);
-		// multiplication-table
-		b_mntl = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->mntl[0]) * cr->ncn, &cr->mntl[0], &cl_errcode_ret);
-		OCL_CHECK_ERROR(cl_errcode_ret);
-		// rg
-		b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
-		OCL_CHECK_ERROR(cl_errcode_ret);
+		return opencl_error_msgs[index];
 	}
 
-	/* Run kernel */
-	if (0 && cr->tp == TOT && cr->ncn == 3) {
-		int LT = 1;
-		ng = (ng + 1) / LT;
 
-		if (1) {
-			int ws = scsz;// +2 * ng;			// work-size - nr of cells to process
-			int wi = 64;						// item-size in cells
-			int wg = 128;						// group-size in items
+	typedef struct OCLCA {
+		cl_int				success;
+		cl_context			context;
+		cl_command_queue	command_queue;
+		cl_kernel			kernel_ca_next_gen;
+		cl_kernel			kernel_ca_next_gen_tot_ncn3;
+		cl_kernel			kernel_ca_next_gen_abs_ncn3_ncs2;
+		cl_kernel			kernel_ca_next_gen_range_tot_ncn3;
+		cl_kernel			kernel_ca_next_gen_vba;
+	} OCLCA;
+	// **********************************************************************************************************************************
+	// OCL Functions ********************************************************************************************************************
+	// **********************************************************************************************************************************
+	// returns valid opencl kernel object
+	#define CL_MAX_PLATFORM_COUNT (4)
+	#define CL_MAX_DEVICE_COUNT (4)
+	OCLCA
+	OCLCA_Init(
+		const char* cl_filename
+	) {
+		OCLCA result;
+		result.command_queue = NULL;
+		result.context = NULL;
+		result.kernel_ca_next_gen = NULL;
+		result.kernel_ca_next_gen_tot_ncn3 = NULL;
+		result.kernel_ca_next_gen_abs_ncn3_ncs2 = NULL;
+		result.kernel_ca_next_gen_range_tot_ncn3 = NULL;
+		result.success = CL_SUCCESS;
 
-			lws[0] = 128;
-			gws[0] = ws / wi / wg * wg;
-			while (gws[0] * wi < ws)
-				gws[0] += wg;
+		//return result;
 
-			rg = 0;
-			//ng = 1;
-			clReleaseMemObject(b_rg);
-			b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
-			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clCreateBuffer failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
-
-			printf("ng %d  ws %d  wi %d  wg %d  gws[0] %d gws[0]*wi %d  max ws %d\n", ng, ws, wi, wg, gws[0], gws[0] * wi, scsz + brsz);
-		}
-		else {
-			int ws = scsz + 2 * ng;			// work-size - nr of cells to process
-			int gs = 128;					// group-size in items
-			int gc = 1;						// group-count
-
-			int gn = gs - 2 * LT;			// group-netto - netto amount of items fully processed after acessing gs items
-
-			int gr;							// group-range per group - nr of items one group processes
-
-			// count fixed, range free
-			gr = ws / gc / gs;					// work is distributed among gc groups
-			gr = gr / gn;					// each group processes gs items in parallel
-			while (gr * gn * gc * gs < ws)		// make sure at least ndss items are processed
-				++gr;
-
-			// range fixed, count free
-			//gr = 1;
-			//gc = ws / gn;
-			//while (gr * gn * gc < ws)		// make sure at least ndss items are processed
-			//	++gc;
+			////////// BEGIN SETUP GPU COMMUNICATION
 
 
-			static int dc = 0;
-			if (1 | ++dc == 100) {
-				dc = 0;
-				printf("ng %d  ws %d  gc %d  gs %d  gn %d  gr %d  gr*gn*gc %d  max ws %d\n", ng, ws, gc, gs, gn, gr, gr * gn * gc, scsz + brsz);
+			// Find the first GPU device
+		cl_int cl_errcode_ret;				// used to retrieve opencl error codes
+		cl_device_id selected_device = 0;
+
+		cl_uint platform_count = 0;
+		clGetPlatformIDs(0, NULL, &platform_count);
+		cl_platform_id platform_ids[CL_MAX_PLATFORM_COUNT];
+		clGetPlatformIDs(CL_MAX_PLATFORM_COUNT, platform_ids, &platform_count);
+
+		/* Macros to help display device infos */
+	#define OCL_PRINT_DEVICE_INFO_STRING(cl_device_info) { \
+		OCL_CHECK_ERROR(clGetDeviceInfo(device, cl_device_info, sizeof(string1024), &string1024, NULL)); \
+		printf("clGetDeviceInfo %-40s %s\n", #cl_device_info, string1024); }
+	#define OCL_PRINT_DEVICE_INFO_UINT(cl_device_info) { \
+		OCL_CHECK_ERROR(clGetDeviceInfo(device, cl_device_info, sizeof(rt_cl_uint), &rt_cl_uint, NULL)); \
+		printf("clGetDeviceInfo %-40s %u\n", #cl_device_info, rt_cl_uint); }
+		/* */
+		char string1024[1024];
+		cl_uint rt_cl_uint;
+		for (int pi = 0; pi < platform_count; pi++) {
+			cl_platform_id platform_id = platform_ids[pi];
+
+			cl_uint device_count = 0;
+			clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, 0, NULL, &device_count);
+			cl_device_id device_ids[CL_MAX_DEVICE_COUNT];
+			clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, CL_MAX_DEVICE_COUNT, device_ids, &device_count);
+
+			fprintf(stderr, "SUC platform found  platform count %d  platform #%d  device count %d  device id #0 %d%d\n",
+				platform_count, pi, device_count, device_ids[0]);
+
+			for (int i = 0; i < device_count; i++) {
+				cl_device_id device = device_ids[i];
+				OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_NAME)
+					OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_VENDOR)
+					OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_VERSION)
+					OCL_PRINT_DEVICE_INFO_STRING(CL_DRIVER_VERSION)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_ADDRESS_BITS)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_MAX_CLOCK_FREQUENCY)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_MAX_COMPUTE_UNITS)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_LONG)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_FLOAT)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_CHAR)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_SHORT)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_INT)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_LONG)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_FLOAT)
+					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_DOUBLE)
+					//OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_EXTENSIONS)
+
+					if (pi == 0) {
+						selected_device = device;
+						printf("SELECTED\n");
+					}
 			}
-			if (gr * gn * gc * 16 > scsz + brsz) {
-				printf("!!!! working size to big / border to small\n");
-				gr = 0;
-			}
-
-			rg = gr;
-			clReleaseMemObject(b_rg);
-			b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
-			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clCreateBuffer failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
-
-			// kernel ca_next_gen_tot_ncn3
-			///lws[0] = 128;
-			lws[0] = gs;
-			//gws[0] = (scsz + brsz - cr->ncn + 1 - 512 /* LT */) / rg;
-			///gws[0] = ((scsz + brsz - cr->ncn + 1) / rg + 1) / 128 * 128;
-			//gws[0] = scsz / rg + 1;
-			gws[0] = gc * gs;
-		}
-		///printf("gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
-		// set constant kernel arguments
-		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, 2, sizeof(b_rltl), &b_rltl);
-		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
-		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, 3, sizeof(b_rg), &b_rg);
-		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
-		// run kernel rt times
-		for (int rt = 0; rt < ng; ++rt) {
-			// advance clfp
-			if (++clfp == 2) clfp = 0;
-			///printf("clfp %d\n", clfp);
-			// set variable kernel arguments
-			cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, clfp == 1, sizeof(b_cli), &b_cli);
-			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg failed with error code  %d.\n", cl_errcode_ret);
-			cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, clfp == 0, sizeof(b_clo), &b_clo);
-			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg failed with error code  %d.\n", cl_errcode_ret);
-			// run kernel
-			cl_errcode_ret = clEnqueueNDRangeKernel(oclca.command_queue, oclca.kernel_ca_next_gen_range_tot_ncn3, work_dim, NULL, &gws, &lws, 0, NULL, NULL);
-			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clEnqueueNDRangeKernel for kenrel 'ca_next_gen_tot_ncn3' failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
-			//else									printf("SUC clEnqueueNDRangeKernel for kenrel 'ca_next_gen_tot_ncn3' near line %d.\n", __LINE__);
-		}
-	}
-	// SIMPLE KERNEL
-	else {
-		/* Make sure kernrel is available */
-		//if (oclca.kernel_ca_next_gen == NULL || oclca.kernel_ca_next_gen_tot_ncn3 == NULL)
-		//	return 0;
-
-		cl_kernel kernel = oclca.kernel_ca_next_gen_tot_ncn3;
-		if (cr->ncn == 3 && cr->ncs == 2)
-			kernel = oclca.kernel_ca_next_gen_abs_ncn3_ncs2;
-		int mnsz = (scsz + ng * (cr->ncn - 1));	// minimum size needed to process
-		int mxsz = scsz + brsz;	// maximum size
-		lws[0] = 1024;
-		gws[0] = mnsz / lws[0] * lws[0];
-		while (gws[0] < mnsz)
-			gws[0] += lws[0];
-		//		printf("smpl krnl  ng %6d  gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", ng, gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
-
-		if (gws[0] > mxsz) {
-			printf("space size insufficient! aborting.\n");
-			printf("smpl krnl  ng %6d  gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", ng, gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
-			return;
 		}
 
+		if (!selected_device) {
+			fprintf(stderr, "ERR failed to find any OpenCL GPU device. Sorry.\n");
+			result.success = selected_device;
+			return result;
+		}
+
+		// clCreateContext
+		cl_context context = clCreateContext(NULL, 1, &selected_device, NULL, NULL, &cl_errcode_ret);
+		OCL_CHECK_ERROR(cl_errcode_ret);
+		// clCreateCommandQueue
+		cl_command_queue command_queue = clCreateCommandQueue(context, selected_device, 0, &cl_errcode_ret);
+		if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clCreateCommandQueue @0x%x\n", command_queue);
+		else									printf("ERR clCreateCommandQueue failed with error code %d\n", cl_errcode_ret);
+		// clCreateProgramWithSource
+		const char* program_code = read_file(cl_filename);
+		cl_program program = clCreateProgramWithSource(context, 1, (const char* []) { program_code }, NULL, & cl_errcode_ret);
+		if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clCreateProgramWithSource @0x%x\n", program);
+		else									printf("ERR clCreateProgramWithSource failed with error code %d\n", cl_errcode_ret);
+		// clBuildProgram
+		cl_errcode_ret = clBuildProgram(program, 0, NULL, "", NULL, NULL);
+		if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clBuildProgram\n");
+		if (cl_errcode_ret != CL_SUCCESS) {
+			printf("ERR clBuildProgram failed with error code %d\n", cl_errcode_ret);
+			char compiler_log[4096] = "EMPTY\0";
+			clGetProgramBuildInfo(program, selected_device, CL_PROGRAM_BUILD_LOG, sizeof(compiler_log), compiler_log, NULL);
+			printf("    error log\n%s\n", compiler_log);
+			result.success = cl_errcode_ret;
+			return result;
+		}
+		// clCreateKernel
+		////result.kernel_ca_next_gen = clCreateKernel(program, "ca_next_gen", &cl_errcode_ret);
+		////OCL_CHECK_ERROR(cl_errcode_ret)
+		////result.kernel_ca_next_gen_tot_ncn3 = clCreateKernel(program, "ca_next_gen_tot_ncn3", &cl_errcode_ret);
+		////OCL_CHECK_ERROR(cl_errcode_ret)
+		////result.kernel_ca_next_gen_abs_ncn3_ncs2 = clCreateKernel(program, "ca_next_gen_abs_ncn3_ncs2", &cl_errcode_ret);
+		////OCL_CHECK_ERROR(cl_errcode_ret)	
+		////result.kernel_ca_next_gen_range_tot_ncn3 = clCreateKernel(program, "ca_next_gen_range_tot_ncn3", &cl_errcode_ret);
+		////OCL_CHECK_ERROR(cl_errcode_ret)
+		result.kernel_ca_next_gen_vba = clCreateKernel(program, "ca_next_gen_vba", &cl_errcode_ret);
+		OCL_CHECK_ERROR(cl_errcode_ret)
+			// get some kernel info
+		{
+			cl_kernel kernel = result.kernel_ca_next_gen_vba;
+			size_t kwgs = 0;
+			OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_WORK_GROUP_SIZE, sizeof(kwgs), &kwgs, NULL));
+			printf("CL_KERNEL_WORK_GROUP_SIZE %u\n", kwgs);
+			size_t pwgsm = 0;
+			OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE, sizeof(pwgsm), &pwgsm, NULL));
+			printf("CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE %u\n", pwgsm);
+			cl_ulong pms = 0;
+			OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_PRIVATE_MEM_SIZE, sizeof(pms), &pms, NULL));
+			printf("CL_KERNEL_PRIVATE_MEM_SIZE %u\n", pms);
+			cl_ulong lms = 0;
+			OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_LOCAL_MEM_SIZE, sizeof(lms), &lms, NULL));
+			printf("CL_KERNEL_LOCAL_MEM_SIZE %u\n", pms);
+		}
 		//
-		// set constant kernel arguments
-		///OCL_CHECK_ERROR(clSetKernelArg(kernel, 2, sizeof(b_ncn), &b_ncn));
-		OCL_CHECK_ERROR(clSetKernelArg(kernel, 2, sizeof(b_rltl), &b_rltl));
-		///OCL_CHECK_ERROR(clSetKernelArg(kernel, 4, sizeof(b_mntl), &b_mntl));
-		// run kernel rt times
-		for (int rt = 0; rt < ng; ++rt) {
-			// advance clfp
-			if (++clfp == 2) clfp = 0;
-			// set variable kernel arguments
-			OCL_CHECK_ERROR(clSetKernelArg(kernel, clfp == 1, sizeof(b_cli), &b_cli));
-			OCL_CHECK_ERROR(clSetKernelArg(kernel, clfp == 0, sizeof(b_clo), &b_clo));
-			// run kernel
-			OCL_CHECK_ERROR(clEnqueueNDRangeKernel(oclca.command_queue, kernel, work_dim, NULL, &gws, &lws, 0, NULL, NULL));
+		result.context = context;
+		result.command_queue = command_queue;
+
+		// cleanup
+		//clReleaseProgram(program);
+		//clReleaseCommandQueue(command_queue);
+		//clReleaseContext(context);
+
+		return result;
+	}
+	//**********************************************************************************************************************************
+	/* Calculate next generation OpenCL   flexible variant - can handle totalistic and absolute rules by use of multiplication table */
+	void OCLCA_Run(
+		int ng,					// nr of generations
+		int res,				// reset flag, is 1 if anything changes
+		OCLCA oclca,
+		CA_RULE* cr,
+		int sync_memory,
+		const CA_CT* clv,		// cell-line first valid element - this array must include brd > size must ne spsz + brd
+		const int scsz,			// space-size
+		const int brsz,			// border-size
+		cl_uint rg)		// range per kernel
+	{
+		rg = max(1, rg);
+
+		cl_int cl_errcode_ret;	// used to retrieve opencl error codes
+
+		// define how many kernels run in parallel
+		cl_uint work_dim = 1;
+		cl_uint gws[1];		// global work size
+		cl_uint lws[1];		// local work size
+
+		///printf("clv %x  scsz %d  gws[0] %u  klrg %u\n", clv, scsz, gws[0], rg);
+
+		// create host to device memory bindings and transfer memory from host to device
+		static cl_mem b_cli = NULL;			// opencl binding for cell-line
+		static cl_mem b_clo = NULL;			// opencl binding for cell-line
+		static cl_mem b_clsz = NULL;			// opencl binding for cell-line-size
+		static cl_mem b_ncn = NULL;			// opencl binding for ncn
+		static cl_mem b_rltl = NULL;			// opencl binding for 
+		static cl_mem b_mntl = NULL;			// opencl binding for
+		static cl_mem b_rg = NULL;			// opencl binding for
+		static int clfp = 0;			// cell-line flip to switch between cli and clo
+		/* Init device memory and host-device-memory-bindings and kernel arguments */
+		if (1 || sync_memory || res || b_cli == NULL) {
+			//printf("opencl_ca memory reset\n");
+			sync_memory = 1;
+			clfp = 1;
+			// clean up
+			if (b_cli != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_cli));
+			if (b_clo != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_clo));
+			if (b_ncn != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_ncn));
+			if (b_rltl != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_rltl));
+			if (b_mntl != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_mntl));
+			if (b_rg != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_rg));
+			// cli
+			b_cli = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, (scsz + brsz) * sizeof(*clv), clv, &cl_errcode_ret);
+			OCL_CHECK_ERROR(cl_errcode_ret);
+			// clo
+			b_clo = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE, (scsz + brsz) * sizeof(*clv), NULL, &cl_errcode_ret);
+			OCL_CHECK_ERROR(cl_errcode_ret);
+			// ncn
+			b_ncn = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->ncn), &cr->ncn, &cl_errcode_ret);
+			OCL_CHECK_ERROR(cl_errcode_ret);
+			// rule-table
+			b_rltl = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->rltl[0]) * cr->nns, &cr->rltl[0], &cl_errcode_ret);
+			OCL_CHECK_ERROR(cl_errcode_ret);
+			// multiplication-table
+			b_mntl = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->mntl[0]) * cr->ncn, &cr->mntl[0], &cl_errcode_ret);
+			OCL_CHECK_ERROR(cl_errcode_ret);
+			// rg
+			b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
+			OCL_CHECK_ERROR(cl_errcode_ret);
+		}
+
+		/* Run kernel */
+		if (0 && cr->tp == TOT && cr->ncn == 3) {
+			int LT = 1;
+			ng = (ng + 1) / LT;
+
+			if (1) {
+				int ws = scsz;// +2 * ng;			// work-size - nr of cells to process
+				int wi = 64;						// item-size in cells
+				int wg = 128;						// group-size in items
+
+				lws[0] = 128;
+				gws[0] = ws / wi / wg * wg;
+				while (gws[0] * wi < ws)
+					gws[0] += wg;
+
+				rg = 0;
+				//ng = 1;
+				clReleaseMemObject(b_rg);
+				b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
+				if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clCreateBuffer failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
+
+				printf("ng %d  ws %d  wi %d  wg %d  gws[0] %d gws[0]*wi %d  max ws %d\n", ng, ws, wi, wg, gws[0], gws[0] * wi, scsz + brsz);
+			}
+			else {
+				int ws = scsz + 2 * ng;			// work-size - nr of cells to process
+				int gs = 128;					// group-size in items
+				int gc = 1;						// group-count
+
+				int gn = gs - 2 * LT;			// group-netto - netto amount of items fully processed after acessing gs items
+
+				int gr;							// group-range per group - nr of items one group processes
+
+				// count fixed, range free
+				gr = ws / gc / gs;					// work is distributed among gc groups
+				gr = gr / gn;					// each group processes gs items in parallel
+				while (gr * gn * gc * gs < ws)		// make sure at least ndss items are processed
+					++gr;
+
+				// range fixed, count free
+				//gr = 1;
+				//gc = ws / gn;
+				//while (gr * gn * gc < ws)		// make sure at least ndss items are processed
+				//	++gc;
+
+
+				static int dc = 0;
+				if (1 | ++dc == 100) {
+					dc = 0;
+					printf("ng %d  ws %d  gc %d  gs %d  gn %d  gr %d  gr*gn*gc %d  max ws %d\n", ng, ws, gc, gs, gn, gr, gr * gn * gc, scsz + brsz);
+				}
+				if (gr * gn * gc * 16 > scsz + brsz) {
+					printf("!!!! working size to big / border to small\n");
+					gr = 0;
+				}
+
+				rg = gr;
+				clReleaseMemObject(b_rg);
+				b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
+				if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clCreateBuffer failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
+
+				// kernel ca_next_gen_tot_ncn3
+				///lws[0] = 128;
+				lws[0] = gs;
+				//gws[0] = (scsz + brsz - cr->ncn + 1 - 512 /* LT */) / rg;
+				///gws[0] = ((scsz + brsz - cr->ncn + 1) / rg + 1) / 128 * 128;
+				//gws[0] = scsz / rg + 1;
+				gws[0] = gc * gs;
+			}
+			///printf("gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
+			// set constant kernel arguments
+			cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, 2, sizeof(b_rltl), &b_rltl);
+			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
+			cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, 3, sizeof(b_rg), &b_rg);
+			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
+			// run kernel rt times
+			for (int rt = 0; rt < ng; ++rt) {
+				// advance clfp
+				if (++clfp == 2) clfp = 0;
+				///printf("clfp %d\n", clfp);
+				// set variable kernel arguments
+				cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, clfp == 1, sizeof(b_cli), &b_cli);
+				if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg failed with error code  %d.\n", cl_errcode_ret);
+				cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, clfp == 0, sizeof(b_clo), &b_clo);
+				if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg failed with error code  %d.\n", cl_errcode_ret);
+				// run kernel
+				cl_errcode_ret = clEnqueueNDRangeKernel(oclca.command_queue, oclca.kernel_ca_next_gen_range_tot_ncn3, work_dim, NULL, &gws, &lws, 0, NULL, NULL);
+				if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clEnqueueNDRangeKernel for kenrel 'ca_next_gen_tot_ncn3' failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
+				//else									printf("SUC clEnqueueNDRangeKernel for kenrel 'ca_next_gen_tot_ncn3' near line %d.\n", __LINE__);
+			}
+		}
+		// SIMPLE KERNEL
+		else {
+			/* Make sure kernrel is available */
+			//if (oclca.kernel_ca_next_gen == NULL || oclca.kernel_ca_next_gen_tot_ncn3 == NULL)
+			//	return 0;
+
+			cl_kernel kernel = oclca.kernel_ca_next_gen_tot_ncn3;
+			if (cr->ncn == 3 && cr->ncs == 2)
+				kernel = oclca.kernel_ca_next_gen_abs_ncn3_ncs2;
+			int mnsz = (scsz + ng * (cr->ncn - 1));	// minimum size needed to process
+			int mxsz = scsz + brsz;	// maximum size
+			lws[0] = 1024;
+			gws[0] = mnsz / lws[0] * lws[0];
+			while (gws[0] < mnsz)
+				gws[0] += lws[0];
+			//		printf("smpl krnl  ng %6d  gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", ng, gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
+
+			if (gws[0] > mxsz) {
+				printf("space size insufficient! aborting.\n");
+				printf("smpl krnl  ng %6d  gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", ng, gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
+				return;
+			}
+
+			//
+			// set constant kernel arguments
+			///OCL_CHECK_ERROR(clSetKernelArg(kernel, 2, sizeof(b_ncn), &b_ncn));
+			OCL_CHECK_ERROR(clSetKernelArg(kernel, 2, sizeof(b_rltl), &b_rltl));
+			///OCL_CHECK_ERROR(clSetKernelArg(kernel, 4, sizeof(b_mntl), &b_mntl));
+			// run kernel rt times
+			for (int rt = 0; rt < ng; ++rt) {
+				// advance clfp
+				if (++clfp == 2) clfp = 0;
+				// set variable kernel arguments
+				OCL_CHECK_ERROR(clSetKernelArg(kernel, clfp == 1, sizeof(b_cli), &b_cli));
+				OCL_CHECK_ERROR(clSetKernelArg(kernel, clfp == 0, sizeof(b_clo), &b_clo));
+				// run kernel
+				OCL_CHECK_ERROR(clEnqueueNDRangeKernel(oclca.command_queue, kernel, work_dim, NULL, &gws, &lws, 0, NULL, NULL));
+			}
+		}
+		/* Transfer device memory to host memory */
+		if (sync_memory) {
+			//if (1) {// && sync_memory && b_clo != NULL) {
+			cl_mem b_cl;
+			if (clfp == 0)	b_cl = b_clo;
+			else			b_cl = b_cli;
+			OCL_CHECK_ERROR(clEnqueueReadBuffer(oclca.command_queue, b_cl, CL_TRUE, 0, scsz * sizeof(*clv), clv, NULL, 0, NULL));
+
+			//clEnqueueMapBuffer(oclca.command_queue, b_cl, CL_TRUE, CL_MAP_READ, 0, (scsz + brsz) * sizeof(*clv), 0, NULL, NULL, &cl_errcode_ret);
+			//if (cl_errcode_ret != CL_SUCCESS)			printf("ERR clEnqueueMapBuffer failed with error code %d\n", cl_errcode_ret);
+			////	///memcpy(DeMa, result, DMS * sizeof(*DeMa));
+			//clEnqueueUnmapMemObject(oclca.command_queue, b_cl, 0, 0, NULL, NULL);
 		}
 	}
-	/* Transfer device memory to host memory */
-	if (sync_memory) {
-		//if (1) {// && sync_memory && b_clo != NULL) {
-		cl_mem b_cl;
-		if (clfp == 0)	b_cl = b_clo;
-		else			b_cl = b_cli;
-		OCL_CHECK_ERROR(clEnqueueReadBuffer(oclca.command_queue, b_cl, CL_TRUE, 0, scsz * sizeof(*clv), clv, NULL, 0, NULL));
 
-		//clEnqueueMapBuffer(oclca.command_queue, b_cl, CL_TRUE, CL_MAP_READ, 0, (scsz + brsz) * sizeof(*clv), 0, NULL, NULL, &cl_errcode_ret);
-		//if (cl_errcode_ret != CL_SUCCESS)			printf("ERR clEnqueueMapBuffer failed with error code %d\n", cl_errcode_ret);
-		////	///memcpy(DeMa, result, DMS * sizeof(*DeMa));
-		//clEnqueueUnmapMemObject(oclca.command_queue, b_cl, 0, 0, NULL, NULL);
+
+	// **********************************************************************************************************************************
+	/* Calculate next generation OpenCL   flexible variant - can handle totalistic and absolute rules by use of multiplication table */
+	void OCLCA_RunVBA(
+		int gnc,										// nr of generations
+		int res,									// reset flag, is 1 if anything changes
+		OCLCA oclca,
+		CA_RULE* cr,
+		caBitArray vba,
+		int sync_memory,
+		cl_uint rg)									// range per kernel
+	{
+		rg = max(1, rg);
+
+		cl_int cl_errcode_ret;						// used to retrieve opencl error codes
+
+		// create host to device memory bindings and transfer memory from host to device
+		static cl_mem b_vba = NULL;					// opencl binding for vertical-bit-array
+		/* Init device memory and host-device-memory-bindings and kernel arguments */
+		if (1 || sync_memory || res || b_vba == NULL) {
+			//printf("opencl_ca memory reset\n");
+			sync_memory = 1;
+			// clean up
+			if (b_vba != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_vba));
+			// vba
+			b_vba = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, vba.ct / 8 + vba.oc * vba.rw / 8, vba.v, &cl_errcode_ret);
+			OCL_CHECK_ERROR(cl_errcode_ret);
+		}
+
+		/* Run kernel */
+		// define how many kernels run in parallel
+		size_t global = vba.lc;								// global work size
+	///printf("gws %d  rg %d  rc %d  lc %d\n", gws[0], rg, vba.lc, vba.rc);
+		// set kernel arguments
+		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 0, sizeof(b_vba), &b_vba);
+		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #0 failed with error code  %d.\n", cl_errcode_ret);
+		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 1, sizeof(gnc), &gnc);
+		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
+		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 2, sizeof(vba.rc), &vba.rc);
+		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #1 failed with error code  %d.\n", cl_errcode_ret);
+		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 3, sizeof(vba.lc), &vba.lc);
+		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #3 failed with error code  %d.\n", cl_errcode_ret);
+		// run kernel
+		cl_errcode_ret = clEnqueueNDRangeKernel(oclca.command_queue, oclca.kernel_ca_next_gen_vba, 1, NULL, &global, NULL, 0, NULL, NULL);
+		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clEnqueueNDRangeKernel for kenrel 'ca_next_gen_vba' failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
+		//
+		clFinish(oclca.command_queue);
+		/* Transfer device memory back to host memory */
+		if (sync_memory) {
+			printf("vba.ct %d\n", vba.ct);
+			OCL_CHECK_ERROR(clEnqueueReadBuffer(oclca.command_queue, b_vba, CL_TRUE, 0, vba.ct / 8, vba.v, 0, NULL, NULL));
+		}
 	}
-}
-
-
-// **********************************************************************************************************************************
-/* Calculate next generation OpenCL   flexible variant - can handle totalistic and absolute rules by use of multiplication table */
-void OCLCA_RunVBA(
-	int gnc,										// nr of generations
-	int res,									// reset flag, is 1 if anything changes
-	OCLCA oclca,
-	CA_RULE* cr,
-	caBitArray vba,
-	int sync_memory,
-	cl_uint rg)									// range per kernel
-{
-	rg = max(1, rg);
-
-	cl_int cl_errcode_ret;						// used to retrieve opencl error codes
-
-	// create host to device memory bindings and transfer memory from host to device
-	static cl_mem b_vba = NULL;					// opencl binding for vertical-bit-array
-	/* Init device memory and host-device-memory-bindings and kernel arguments */
-	if (1 || sync_memory || res || b_vba == NULL) {
-		//printf("opencl_ca memory reset\n");
-		sync_memory = 1;
-		// clean up
-		if (b_vba != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_vba));
-		// vba
-		b_vba = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, vba.ct / 8 + vba.oc * vba.rw / 8, vba.v, &cl_errcode_ret);
-		OCL_CHECK_ERROR(cl_errcode_ret);
-	}
-
-	/* Run kernel */
-	// define how many kernels run in parallel
-	size_t global = vba.lc;								// global work size
-///printf("gws %d  rg %d  rc %d  lc %d\n", gws[0], rg, vba.lc, vba.rc);
-	// set kernel arguments
-	cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 0, sizeof(b_vba), &b_vba);
-	if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #0 failed with error code  %d.\n", cl_errcode_ret);
-	cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 1, sizeof(gnc), &gnc);
-	if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
-	cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 2, sizeof(vba.rc), &vba.rc);
-	if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #1 failed with error code  %d.\n", cl_errcode_ret);
-	cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 3, sizeof(vba.lc), &vba.lc);
-	if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #3 failed with error code  %d.\n", cl_errcode_ret);
-	// run kernel
-	cl_errcode_ret = clEnqueueNDRangeKernel(oclca.command_queue, oclca.kernel_ca_next_gen_vba, 1, NULL, &global, NULL, 0, NULL, NULL);
-	if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clEnqueueNDRangeKernel for kenrel 'ca_next_gen_vba' failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
-	//
-	clFinish(oclca.command_queue);
-	/* Transfer device memory back to host memory */
-	if (sync_memory) {
-		printf("vba.ct %d\n", vba.ct);
-		OCL_CHECK_ERROR(clEnqueueReadBuffer(oclca.command_queue, b_vba, CL_TRUE, 0, vba.ct / 8, vba.v, 0, NULL, NULL));
-	}
-}
-// **********************************************************************************************************************************
+	// **********************************************************************************************************************************
+#endif
 
 /**
 * from, to		in bits, must be multiple of size of ba->v type (currently 32)
@@ -1274,8 +1282,7 @@ ca_next_gen__simd(
 
 
 
-static UINT8* calt = NULL;							// ca-lookup-table/lut
-
+static UINT8* calt = NULL;									// ca-lookup-table/LUT
 void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 	_aligned_free(vba->v);
 	vba->ct = (vba->ct + BPB - 1) / BPB * BPB + BPB;		// bit-array-count (rounded up / ceil) // allow one extra-element since when we process the last half block we read one half block past the end
@@ -1326,7 +1333,7 @@ UINT32 HCISZPT = 20;						// hash-cell-index-size as power of two, i.e. 8 = inde
 UINT32 HCMXSC = 20;							// hash-cell-maximum-seek-count
 #define HCTMXLV	128							// hash-cell-table-max-level
 
-#define HCTBSPT	2							// hash-cell-table-base-size as power of two
+#define HCTBSPT	2							// hash-cell-table-base-size as power of two -- MUST BE 2 ATM
 #define HCTBS (1<<HCTBSPT)					// hash-cell-table-base-size / size of lowest/smallest level
 //#define HCTBSMK ((1<<HCTBSPT) - 1)			// hash-cell-table-base-size-mask 
 
@@ -1428,7 +1435,7 @@ void HC_print_stats(int crsn) {
 	printf("---\n");
 	printf("sz  tl %ub / %.2fmb  n %u / %.2fb/n\n", HCISZ * sizeof(HCN), (float)HCISZ * sizeof(HCN) / 1024.0 / 1024.0, HCISZ, (float)sizeof(HCN));
 	printf("max-seek-count %d\n", HCMXSC);
-	printf("found-count%% %f%%\n", (100.0 / max(1, abs(hc_stats[HCTMXLV-1].sc)) * abs(hc_stats[HCTMXLV-1].fc)));
+	printf("found-count%% %f%%\n", (100.0 / max(1, abs(hc_stats[HCTMXLV - 1].sc)) * abs(hc_stats[HCTMXLV - 1].fc)));
 	printf("-\n");
 }
 
@@ -1502,11 +1509,11 @@ HCI convert_bit_array_to_hash_array(caBitArray* vba, int* ll) {
 			ltnd = HC_add_node(0, 1 + ((bya[bi] >> 2) & 0x3), &l);
 			ltnd = HC_add_node(0, 1 + ((bya[bi] >> 4) & 0x3), &l);
 			ltnd = HC_add_node(0, 1 + ((bya[bi] >> 6) & 0x3), &l);
-//ltnd = HC_add_node(1, 1 + ((((bya[bi] >> 0) & 0x3) << 2) | (((bya[bi] >> 2) & 0x3) << 0)), &l);
-//ltnd = HC_add_node(1, 1 + ((((bya[bi] >> 4) & 0x3) << 2) | (((bya[bi] >> 6) & 0x3) << 0)), &l);
+			//ltnd = HC_add_node(1, 1 + ((((bya[bi] >> 0) & 0x3) << 2) | (((bya[bi] >> 2) & 0x3) << 0)), &l);
+			//ltnd = HC_add_node(1, 1 + ((((bya[bi] >> 4) & 0x3) << 2) | (((bya[bi] >> 6) & 0x3) << 0)), &l);
 
-//ltnd = HC_add_node(1, 1 + ((bya[bi] >> 0) & 0xF), &l);
-//ltnd = HC_add_node(1, 1 + ((bya[bi] >> 4) & 0xF), &l);
+			//ltnd = HC_add_node(1, 1 + ((bya[bi] >> 0) & 0xF), &l);
+			//ltnd = HC_add_node(1, 1 + ((bya[bi] >> 4) & 0xF), &l);
 			if (l > ml)
 				ml = l;
 		}
@@ -1576,7 +1583,7 @@ return next free adress of cell-space
 > if count of cells in hash-table is the same or more than cells in cell-space, cli is returned
 */
 ///UINT32* display_hash_array(float* pbv, float* pbf, float* pbi, float v, int ll, HCI n, float* mxv, float* mnv) {
-UINT32*  display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, int ll, HCI n, UINT32* mxv, UINT32* mnv) {
+UINT32* display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, int ll, HCI n, UINT32* mxv, UINT32* mnv) {
 	if (ds.hddh >= -1) {
 		if (ds.hddh == -1 || ll <= ds.hddh || ds.hddh < ds.hdll) {
 			//v *= max(1, (hct[n].uc & HCUCMK));
@@ -1590,10 +1597,10 @@ UINT32*  display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, int
 			v += hct[n].uc & HCUCMK;
 		}
 	}
-	
+
 	if (ll <= ds.hdll) {
-///v = fnv_32_buf(&n, 4, v);
-///v = fnv_32_buf(&n, 4, FNV1_32_INIT);
+		///v = fnv_32_buf(&n, 4, v);
+		///v = fnv_32_buf(&n, 4, FNV1_32_INIT);
 		if (v > *mxv || *mxv == 0)
 			*mxv = v;
 		if (v < *mnv || *mnv == 0)
@@ -1771,28 +1778,31 @@ int64_t CA_CNFN_HASH(int64_t pgnc, caBitArray* vba) {
 		hc_stats[i].ss = 0;
 	}
 
-HCI rtnd;		// result node
-	while (pgnc >= (int64_t)(HCTBS / 2) << hc_sl) {
+	HCI rtnd;		// result node
+	///	while (pgnc >= (int64_t)(HCTBS / 2) << hc_sl) {
+	if (sdmrpt) {
 		// Scale up space/size to allow calculate needed time
-		int ul = 0;
-		while (pgnc >= ((int64_t)(HCTBS / 2) << hc_sl) << ul && ul < 63) {
-			ul++;
-		}
-		for (int l = 0; l < ul; ++l) {
+///		int ul = 0;
+///		while (pgnc >= ((int64_t)(HCTBS / 2) << hc_sl) << ul && ul < 63) {
+///			ul++;
+///		}
+///		for (int l = 0; l < ul; ++l) {
+		for (int l = 0; l < sdmrpt; ++l) {
 			hc_sl++;
 			hct[hc_sn].uc++;
 			HCI hn = HC_find_or_add_branch(hc_sl, hc_sn, hc_sn, &rtnd);
 			hct[hc_sn].uc--;
 			hc_sn = hn;
 		}
-//		hc_sn = hct[hc_sn].r;
-hc_sn = rtnd;
+		//		hc_sn = hct[hc_sn].r;
+		hc_sn = rtnd;
 		hc_sl--;
-		for (int l = 1; l < ul; ++l) {
+		///		for (int l = 1; l < ul; ++l) {
+		for (int l = 1; l < sdmrpt; ++l) {
 			hc_sn = hct[hc_sn].ln;					// dont use result node here as it is later in time!
 			hc_sl--;
 		}
-		break;
+		///		break;
 	}
 
 	//
@@ -1810,7 +1820,7 @@ void CA_SCFN_HASH(caBitArray* vba) {
 ll		level
 mxll*	max-level
 
-returns last added (and therefor top-most) node
+returns last added (and therefore top-most) node
 */
 HCI HC_add_node(int ll, HCI n, int* mxll) {
 #define D 0				// debug-mode
@@ -1825,7 +1835,7 @@ HCI HC_add_node(int ll, HCI n, int* mxll) {
 	if (hcls[ll] == 0) {
 		// Branch is empty > add first node and wait for the seconde one
 		hcln[ll] = n;
-if (ll) hct[n].uc++;
+		if (ll) hct[n].uc++;
 		hcls[ll] = 1;
 		return n;
 	}
@@ -1833,7 +1843,7 @@ if (ll) hct[n].uc++;
 		*mxll = ll;
 		HCI ln = hcln[ll];							// left-node
 		HCI rn = n;									// right-node
-if (ll) hct[n].uc++;
+		if (ll) hct[n].uc++;
 		HCI nn;										// new-node
 		static HCI tn = 0;
 		hcls[ll] = 0;
@@ -1841,9 +1851,9 @@ if (ll) hct[n].uc++;
 		tn = HC_find_or_add_branch(ll, ln, rn, NULL);
 		// Prepare node one level up
 		nn = HC_add_node(ll + 1, tn, mxll);
-if (ll) hct[ln].uc--;
-if (ll) hct[rn].uc--;
-//hct[tn].uc--;
+		if (ll) hct[ln].uc--;
+		if (ll) hct[rn].uc--;
+		//hct[tn].uc--;
 		return nn;
 	}
 }
@@ -1930,18 +1940,18 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 		while (1) {
 			UINT8 cs = i;	// cell-space
 			// get result byte
-				for (int p = 0; p < 2; ++p) {
-					// get result bit
-					int sr =
-						cr->mntl[0] * (1 & (cs >> (p + 0))) +
-						cr->mntl[1] * (1 & (cs >> (p + 1))) +
-						cr->mntl[2] * (1 & (cs >> (p + 2)));
-					// set result bit in cs
-					if (cr->rltl[sr] == 0)
-						cs &= ((UINT8)~((UINT8)1 << p));
-					else
-						cs |= (UINT8)1 << p;
-				}
+			for (int p = 0; p < 2; ++p) {
+				// get result bit
+				int sr =
+					cr->mntl[0] * (1 & (cs >> (p + 0))) +
+					cr->mntl[1] * (1 & (cs >> (p + 1))) +
+					cr->mntl[2] * (1 & (cs >> (p + 2)));
+				// set result bit in cs
+				if (cr->rltl[sr] == 0)
+					cs &= ((UINT8)~((UINT8)1 << p));
+				else
+					cs |= (UINT8)1 << p;
+			}
 			// store result byte
 			HCI nn, ln, rn, rt;
 			ln = 1 + ((i >> 0) & 0x3);
@@ -1953,13 +1963,13 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 //nn = i);
 //hct[nn].ll = 0;
 ///hct[nn].fs = 1;
-hct[nn].uc = 1;		// level is 0
-hct[nn].ln = ln;
-hct[nn].rn = rn;
-hct[nn].r = rt;
-hc_stats[0].nc++;
+			hct[nn].uc = 1;		// level is 0
+			hct[nn].ln = ln;
+			hct[nn].rn = rn;
+			hct[nn].r = rt;
+			hc_stats[0].nc++;
 
-printf("base node  %d  cm %8X  ln %8X  rn %8X  rt %8X\n", i, nn, ln, rn, rt);
+			printf("base node  %d  cm %8X  ln %8X  rn %8X  rt %8X\n", i, nn, ln, rn, rt);
 			//
 			if (i == 0xF)
 				break;
@@ -2008,31 +2018,17 @@ printf("base node  %d  cm %8X  ln %8X  rn %8X  rt %8X\n", i, nn, ln, rn, rt);
 int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
 	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz);
 
-	if (pgnc > 0) {
-		while (pgnc > 3) {
-			// copy wrap arround buffer
-			uint8_t* wb = vba->v;
-			wb[vba->scsz / 8] = wb[0];
-			//
-			for (int bi = 0, sz = vba->scsz / 8; bi < sz; ++bi) {
-				UINT8* bya = vba->v;  // need to adress on byte-basis
-				bya += bi;
-				*bya = calt[((UINT32)3 << 16) | *(UINT16*)bya];
-			}
-			pgnc -= 4;
+	while (pgnc) {
+		// copy wrap arround buffer
+		uint8_t* wb = vba->v;
+		wb[vba->scsz / 8] = wb[0];
+		//
+		for (int bi = 0, sz = vba->scsz / 8; bi < sz; ++bi) {
+			UINT8* bya = vba->v;  // need to adress on byte-basis
+			bya += bi;
+			*bya = calt[(((UINT32)min(3, pgnc - 1)) << 16) | *(UINT16*)bya];
 		}
-		if (pgnc) {
-			// copy wrap arround buffer
-			uint8_t* wb = vba->v;
-			wb[vba->scsz / 8] = wb[0];
-			//
-			for (int bi = 0, sz = vba->scsz / 8; bi < sz; ++bi) {
-				UINT8* bya = vba->v;  // need to adress on byte-basis
-				bya += bi;
-				*bya = calt[((UINT32)(pgnc - 1) << 16) | *(UINT16*)bya];
-			}
-			pgnc = 0;
-		}
+		pgnc -= min(4, pgnc);
 	}
 
 	convert_bit_array_to_CA_CT((FBPT*)vba->v, vba->clsc, vba->scsz);
@@ -2048,6 +2044,7 @@ void CA_CNITFN_BOOL(caBitArray* vba, CA_RULE* cr) {
 
 int64_t CA_CNFN_BOOL(int64_t pgnc, caBitArray* vba) {
 	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz + 8);
+
 	while (pgnc > 0) {
 		// copy wrap arround buffer
 		uint8_t* wb = vba->v;
@@ -2116,10 +2113,16 @@ int64_t CA_CNFN_DISABLED(int64_t pgnc, caBitArray* vba) {
 	return 0;
 }
 
-static OCLCA oclca = { -1, NULL, NULL, NULL };
+#ifdef ENABLE_CL 
+	static OCLCA oclca = { -1, NULL, NULL, NULL };
+#endif
 void CA_CNITFN_OPENCL(caBitArray* vba, CA_RULE* cr) {
-	if (oclca.success != CL_SUCCESS)
-		oclca = OCLCA_Init("../opencl-vba.cl");
+	#ifdef ENABLE_CL 
+		if (oclca.success != CL_SUCCESS)
+			oclca = OCLCA_Init("../opencl-vba.cl");
+	#else
+		printf("OpenCL support is not available in this build!\n");
+	#endif
 
 	//
 	vba->lc = 256;
@@ -2541,9 +2544,13 @@ int64_t CA_CNFN_VBA_2x256(int64_t pgnc, caBitArray* vba) {
 }
 
 int64_t CA_CNFN_OPENCL(int64_t pgnc, caBitArray* vba) {
-	OCLCA_RunVBA(pgnc, 0/*res*/, oclca, vba->cr, *vba, 1/*de*/, 16/*klrg*/);
-	pgnc = 0;
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	#ifdef ENABLE_CL 
+		OCLCA_RunVBA(pgnc, 0/*res*/, oclca, vba->cr, *vba, 1/*de*/, 16/*klrg*/);
+		pgnc = 0;
+		convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	#else
+		printf("OpenCL support is not available in this build!\n");
+	#endif
 	return 0;
 }
 
@@ -2552,9 +2559,9 @@ typedef enum {
 	CM_SISD,											// byte-array			single instrunction single data
 	CM_SIMD,											// byte-array			single instruction multiple data
 	CM_LUT,												// bit-array			look-up-table
-	CM_BOOL,											// bit-array			boolean operators					rule 54 hardcoded
 	CM_HASH,											// bit-array			hash-table
 	CM_VBA_1x256,										// vertical-bit-array	AVX	- 1 lane with 256bits			rule 54 hardcoded
+	CM_BOOL,											// bit-array			boolean operators					rule 54 hardcoded
 	CM_VBA_1x32,										// vertical-bit-array	1 lane with 32bit					rule 54 hardcoded
 	CM_VBA_2x32,										// vertical-bit-array	2 lanes with 32bit					rule 54 hardcoded
 	CM_VBA_4x32,										// vertical-bit-array	4 lanes with 32bit					rule 54 hardcoded
@@ -2571,7 +2578,7 @@ typedef enum {
 // computation-settings-array
 struct {
 	char* name;
-	int64_t		(*cnfn)(int64_t, caBitArray*);			// computation-function
+	int64_t(*cnfn)(int64_t, caBitArray*);			// computation-function
 	void		(*itfn)(caBitArray*);					// init-function
 	void		(*scfn)(caBitArray*);					// sync-(ca-space)-function
 } const ca_cnsgs[CM_MAX] = {
@@ -3147,9 +3154,9 @@ display_2d_lindenmeyer(
 	if (alc == LMH)
 		avs[0] = +sg * hlpz, avs[1] = +sg * plw * vlpz + hlpz, avs[2] = +sg * plw * vlpz - hlpz,
 		avs[3] = -sg * hlpz, avs[4] = -sg * plw * vlpz - hlpz, avs[5] = -sg * plw * vlpz + hlpz;
-		//avs[0] = -2*lw, avs[1] = -1*lw +2, avs[2] = +1*lw +2,
-		//avs[3] = +2*lw, avs[4] = +1*lw -2, avs[5] = -1*lw -2;
-	// tetragonal
+	//avs[0] = -2*lw, avs[1] = -1*lw +2, avs[2] = +1*lw +2,
+	//avs[3] = +2*lw, avs[4] = +1*lw -2, avs[5] = -1*lw -2;
+// tetragonal
 	else if (alc == LMT)
 		avs[0] = +sg * hlpz, avs[1] = +sg * plw * vlpz, avs[2] = -sg * hlpz, avs[3] = -sg * plw * vlpz;
 	// octagonal
@@ -3310,9 +3317,9 @@ display_2d_matze(
 				tx = z % hb;
 				ty = z / hb;
 
-//if (random01() > 0.99999)
-//	printf("i %u  z %u  y %u  x %u  ty %u  tx %u  ds %u  cs %d ds %e\n", i, z, y, x, ty, tx, ds, cs, pow(cs, 1.0 / 3.0));
-				//if (z == mdpm - 1) {
+				//if (random01() > 0.99999)
+				//	printf("i %u  z %u  y %u  x %u  ty %u  tx %u  ds %u  cs %d ds %e\n", i, z, y, x, ty, tx, ds, cs, pow(cs, 1.0 / 3.0));
+								//if (z == mdpm - 1) {
 				UINT32* pnc = pnv + cr + (y + dssg * ty) * vlpz * plw + (x + dssg * tx) * hlpz;				// pixel-screen current element
 				if (pnc >= pnv && pnc < pni)
 					for (int v = 0; v < vlpzplw; v += plw)
@@ -3550,7 +3557,7 @@ lifeanddrawnewcleanzoom(
 		printf("WARNING speed must at least be half of space-size when using hash-computation-mode!\n");
 	if (cnmd == CM_HASH && ((tm & (tm - 1)) != 0 || (scsz & (scsz - 1)) != 0))
 		printf("WARNING speed and size must be power of 2 when using hash-computation-mode!\n");
-	
+
 	/* Init vars and defines */
 	ds.lgm %= 2;
 	if (!ds.vlfs || !ds.hlfs)
@@ -3589,7 +3596,7 @@ lifeanddrawnewcleanzoom(
 	or drawing-calucaltions (hlfs) */
 	int brsz = max(ds.hlfs - 1, cr->ncn - 1);			// buffer-size
 	// #TODO !! ??? Why is max 32 not enough???
-	brsz += 32;  
+	brsz += 32;
 	brsz = max(1024, brsz);
 
 
@@ -3609,12 +3616,12 @@ lifeanddrawnewcleanzoom(
 		/* Scroll pixel-screen to make room to draw tm pixels */
 		int64_t vlsl = tm / ds.vlzm * ds.vlpz;					// vertical scroll / lines to scroll
 		tm = vlsl * ds.vlzm / ds.vlpz;
-int hlsl = 0;											// horizontal scroll
-///hw = 0;
-		// horizontal scrolling is disabled atm since it does not work together with the histogram
-		// and is only possible when output-width and display-width are the same 
-		// if (pbs == plw)
-		//     hlsl = min(plw, (tm % (scsz * vlzm)) / max(1, vlzm * hlzm));				// horizontal scroll / nr. of pixels to scroll
+		int hlsl = 0;											// horizontal scroll
+		///hw = 0;
+				// horizontal scrolling is disabled atm since it does not work together with the histogram
+				// and is only possible when output-width and display-width are the same 
+				// if (pbs == plw)
+				//     hlsl = min(plw, (tm % (scsz * vlzm)) / max(1, vlzm * hlzm));				// horizontal scroll / nr. of pixels to scroll
 		if (vlsl * ds.plw < pni - pnv) {
 			pnc = max(pnv, pni - vlsl * ds.plw - hlsl);			// set cursor to first pixel that has to be drawn
 			scroll(pnv, (pni - pnv) * 4, -4 * (pni - pnc));		// scroll is measured in nr of pixels > convert to argb-pixel with size of 4 byte
@@ -3660,29 +3667,31 @@ int hlsl = 0;											// horizontal scroll
 	/* Init testing-cell-space-buffer */
 	static CA_CT* tcsv = NULL;									// test-cell-array first valid element
 // temporary code for debugging
-static caBitArray tvba = { .v = NULL, .rc = 0, .rw = 0, .clsc = NULL, .ct = 0, .lc = 0, .lw = 0, .mmwn = 0, .oc = 0, .scsz = 0 };				// row-first/vertical-bit-array
-// end temporary code
+	static caBitArray tvba = { .v = NULL, .rc = 0, .rw = 0, .clsc = NULL, .ct = 0, .lc = 0, .lw = 0, .mmwn = 0, .oc = 0, .scsz = 0 };				// row-first/vertical-bit-array
+	// end temporary code
 	if (ds.tm == 2) {
 		_aligned_free(tcsv);									// aligned memory management may be necesary for use of some intrinsic or opencl functions
 		tcsv = _aligned_malloc((scsz + cr->ncn - 1) * sizeof * tcsv, BYAL);
 		memcpy(tcsv, csv, scsz * sizeof * tcsv);
-// temporary code for debugging
-if (cnmd == CM_HASH) {
-	if (tvba.v == NULL || res) {
-		tvba.ct = scsz;
-		tvba.cr = cr;
-		tvba.scsz = scsz;
-		tvba.brsz = brsz;
-		CA_CNITFN_VBA_1x256(&tvba, cr);
-	}
-	tvba.clsc = tcsv;
-}
-// end temporary code
+		// temporary code for debugging
+		if (cnmd == CM_HASH) {
+			if (tvba.v == NULL || res) {
+				tvba.ct = scsz;
+				tvba.cr = cr;
+				tvba.scsz = scsz;
+				tvba.brsz = brsz;
+				CA_CNITFN_VBA_1x256(&tvba, cr);
+			}
+			tvba.clsc = tcsv;
+		}
+		// end temporary code
 	}
 
 	/* Init bit-array-cell-space-buffer */
 	static caBitArray vba = { .v = NULL, .rc = 0, .rw = 0, .clsc = NULL, .ct = 0, .lc = 0, .lw = 0, .mmwn = 0, .oc = 0, .scsz = 0 };				// row-first/vertical-bit-array
 	if (vba.v == NULL || res) {
+		/* Copy cells of wrap behind buffer (last cells in line) */
+		///		memcpy(csv + scsz, csv, brsz * sizeof * csv);
 		vba.ct = scsz;
 		vba.cr = cr;
 		vba.clsc = csv;
@@ -3693,8 +3702,8 @@ if (cnmd == CM_HASH) {
 			printf("CA_CNITFN  %s\n", ca_cnsgs[cnmd].name);
 			(ca_cnsgs[cnmd].itfn)(&vba, cr);
 		}
-		else
-			printf("CA_CNITFN  %s  IS NULL\n", ca_cnsgs[cnmd].name);
+		//else
+		//	printf("CA_CNITFN  %s  IS NULL\n", ca_cnsgs[cnmd].name);
 		///		CA_PrintSpace("org csv", csv, csi - csv);
 ///		CA_PrintSpace("org csv", tcsv, scsz);
 ///		printf("csv memcmp  %d\n", memcmp(csv, tcsv, scsz * sizeof * csv));
@@ -3708,7 +3717,7 @@ if (cnmd == CM_HASH) {
 	/* Init color table */
 	int dyss;
 	switch (ds.fsme) {
-	case 0: 
+	case 0:
 		dyss = max(1, (cr->ncs * (max(1, max(1, ds.hlfs) * max(1, ds.vlfs)))) >> stst);
 		break;
 	case 1:
@@ -3824,7 +3833,7 @@ if (cnmd == CM_HASH) {
 		/* EVOLVE - Calculate next generation(s) of CA */
 		for (int vlp = 0; vlp < ds.vlzm; ++vlp) {
 			/* Copy cells of wrap behind buffer (last cells in line) */
-			memcpy(csv + scsz, csv, brsz * sizeof * csv);
+///			memcpy(csv + scsz, csv, brsz * sizeof * csv);
 			if (de && ds.fsme < 2) {
 				if (vlp == 0) {
 					/* Reset pbv accumulate buffer */
@@ -3857,7 +3866,7 @@ if (cnmd == CM_HASH) {
 		if (de) {
 			if (ds.fsme == 2) {
 				UINT32 v = 1;
-//v = FNV1_32_INIT;
+				//v = FNV1_32_INIT;
 
 				UINT32 mxv = 0;	// max v
 				UINT32 mnv = 0;	// min v
@@ -3877,8 +3886,8 @@ if (cnmd == CM_HASH) {
 
 				display_hash_array(pbv, pbv, pbi, v, hc_sl, hc_sn, &mxv, &mnv);
 
-// 				printf("mxv %u  mnv %u\n", mxv, mnv);
-// 				printf("mxv %e  mnv %e\n", (double)mxv, (double)mnv);
+				// 				printf("mxv %u  mnv %u\n", mxv, mnv);
+				// 				printf("mxv %e  mnv %e\n", (double)mxv, (double)mnv);
 
 #define LOGPRECISION 8
 #define LOGSCALE (1U << LOGPRECISION)
@@ -3893,24 +3902,24 @@ if (cnmd == CM_HASH) {
 						v = (double)*pbc / (double)0xFFFFFFFF;
 					}
 					else if (ds.lgm) {
-					//	//							v = (log2((double)*pbc) - mnvlg) / vlgrg;
-					//	//v = ((double)(log2fix(*pbc * LOGSCALE, LOGPRECISION) / LOGSCALE) - mnvlg) / vlgrg;
-					//	DWORD wv;
-					//	_BitScanReverse(&wv, *pbc);
-					//	v = min(1.0, (wv - mnvlg) / vlgrg);
-					//	//if (!pcg32_boundedrand(100000)) printf("v  %u %u %u  fix  %f  dbl %f\n", *pbc, LOGSCALE, *pbc * LOGSCALE, vf, (log2((double)*pbc) - mnvlg) / vlgrg);
+						//	//							v = (log2((double)*pbc) - mnvlg) / vlgrg;
+						//	//v = ((double)(log2fix(*pbc * LOGSCALE, LOGPRECISION) / LOGSCALE) - mnvlg) / vlgrg;
+						//	DWORD wv;
+						//	_BitScanReverse(&wv, *pbc);
+						//	v = min(1.0, (wv - mnvlg) / vlgrg);
+						//	//if (!pcg32_boundedrand(100000)) printf("v  %u %u %u  fix  %f  dbl %f\n", *pbc, LOGSCALE, *pbc * LOGSCALE, vf, (log2((double)*pbc) - mnvlg) / vlgrg);
 						v = (log2((double)*pbc) - mnvlg) / vlgrg;
 					}
 					else
 						v = ((double)*pbc - (double)mnv) / (double)mxv;
-///						v = ((double)(*(float*)pbc) - (double)mnv) / (double)mxv;
-						//v = (log2((double)(*(float*)pbc)) - mnvlg) / vlgrg;
+					///						v = ((double)(*(float*)pbc) - (double)mnv) / (double)mxv;
+											//v = (log2((double)(*(float*)pbc)) - mnvlg) / vlgrg;
 
-					//if (!pcg32_boundedrand(100000)) printf("col %.4f\n", v);
-											//UINT32 c;
-											//c = getColor(v, ds.cm, ds.crct, ds.gm);
-											//UINT32 gv = 255.0 - 255.0 * v;
-											//c = gv << 16 | gv << 8 | gv;
+										//if (!pcg32_boundedrand(100000)) printf("col %.4f\n", v);
+																//UINT32 c;
+																//c = getColor(v, ds.cm, ds.crct, ds.gm);
+																//UINT32 gv = 255.0 - 255.0 * v;
+																//c = gv << 16 | gv << 8 | gv;
 
 					*pbc = crtl[(int)(v * 0xFF)];
 				}
@@ -4051,10 +4060,10 @@ if (cnmd == CM_HASH) {
 	if (ds.tm == 2 && tcsv != NULL) {
 		// calculate test-cell-space to compare
 // temporary code for debugging
-if (cnmd == CM_HASH) {
-	CA_CNFN_VBA_1x256(otm, &tvba);
-}
-// end temporary code
+		if (cnmd == CM_HASH) {
+			CA_CNFN_VBA_1x256(otm, &tvba);
+		}
+		// end temporary code
 		else {
 			for (int g = 0; g < otm; ++g) {
 				// copy wrap-arround-buffer / border
@@ -4200,7 +4209,7 @@ if (cnmd == CM_HASH) {
 
 /* variant with other way to create patterned background (by using large numbers instead of arrays - seems
 to work and is probably much more efficient than using arrays, but becomes more difficult to handle when
-larger patterns are needed 
+larger patterns are needed
 ALSO is probably a good way to make it possible to enumerate the background patterns and store/load this setting
 */
 //void
@@ -4395,7 +4404,7 @@ CA_MAIN(void) {
 		for (int c = 0; c < CM_MAX; c++) {
 			cm_names[c] = ca_cnsgs[c].name;
 		}
-		nkb.value_strings = cm_names; 
+		nkb.value_strings = cm_names;
 		//
 		nkb.val = &cnmd;
 		nkb.cgfg = &res;
@@ -4417,7 +4426,7 @@ CA_MAIN(void) {
 		nkb.cgfg = &res;
 		nkb.slct_key = SDLK_F6;
 		nkb.min = 10; nkb.max = 30;
-		SIMFW_AddKeyBindings(&sfw, nkb);		
+		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
 		nkb.name = "hash-cell-maximum-seek-count-(computation-mode)";
@@ -4589,7 +4598,7 @@ CA_MAIN(void) {
 		nkb.name = "manual-shift-correction";
 		nkb.val = &ds.mlsc;
 		nkb.slct_key = SDLK_F10;
-		nkb.min = -(1<<30); nkb.max = 1<<30; nkb.wpad = 0;
+		nkb.min = -(1 << 30); nkb.max = 1 << 30; nkb.wpad = 0;
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
@@ -4693,7 +4702,7 @@ CA_MAIN(void) {
 	int nwsz = 0;											// new size
 	nwsc = CA_LoadFromFile("cellspace.bin", &nwsz);
 	// file found
-	if (nwsc) {
+	if (nwsc && nwsz) {
 		ca_space_sz = nwsz;									// remember new size
 		ca_space = nwsc;									// set new space as curren
 	}
@@ -5044,10 +5053,10 @@ CA_MAIN(void) {
 						res = 1;
 					}
 					break;
-				//case SDLK_F3:
-				//	clmd = CLMD_SCREEN;
-				//	SIMFW_SetFlushMsg(&sfw, "control-mode  screen");
-				//	break;
+					//case SDLK_F3:
+					//	clmd = CLMD_SCREEN;
+					//	SIMFW_SetFlushMsg(&sfw, "control-mode  screen");
+					//	break;
 				case SDLK_F10:
 					if (ctl) {
 						SIMFW_LoadKeyBindings(&sfw, "settings.txt");
@@ -5058,7 +5067,7 @@ CA_MAIN(void) {
 						free(ca_space);										// free old space
 						ca_space = nwsc;									// set new space as current
 						res = 1;
-						SIMFW_SetFlushMsg(&sfw, "INFO: Setting and cell-space (%.2e bytes) loaded from file.", (double)sizeof(CA_CT)* ca_space_sz);
+						SIMFW_SetFlushMsg(&sfw, "INFO: Setting and cell-space (%.2e bytes) loaded from file.", (double)sizeof(CA_CT) * ca_space_sz);
 					}
 					else {
 						SIMFW_SaveKeyBindings(&sfw, "settings.txt");
@@ -5118,29 +5127,66 @@ CA_MAIN(void) {
 					tm = 0;
 					res = 1;
 					break;
-				case SDLK_PLUS:
-					if (ctl)
-						ds.hlzm = ds.vlzm = min(ds.hlzm, ds.vlzm) + 1,
-						fscd = 1;
-					else if (sft)
+				case SDLK_PLUS:					
+					if (sft)
 						ds.hlpz = ds.vlpz = min(ds.hlpz, ds.vlpz) + 1,
+						fscd = 1;
+					else if (cnmd == CM_HASH) {
+						HCI en;		// empty node
+						if (ctl) {
+							// build empty node with the same size as current ca
+							en = HC_find_or_add_branch(0, 1, 1, NULL);
+							for (int i = 1; i <= hc_sl; i++) {
+								hct[en].uc++;
+								HCI tn = HC_find_or_add_branch(i, en, en, NULL);
+								hct[en].uc--;
+								en = tn;
+							}
+						}
+						else
+							en = hc_sn;
+						// connect current ca with empty node
+						hc_sl++;
+						hct[hc_sn].uc++;
+						hct[en].uc++;
+						HCI hn = HC_find_or_add_branch(hc_sl, hc_sn, en, NULL);
+						hct[hc_sn].uc--;
+						hct[en].uc--;
+						hc_sn = hn;
+						//
+						ca_space_sz = ca_space_sz * 2;
+						last_ca_space_sz = ca_space_sz;
+						dyrt = 1;
+					}
+					else if (ctl)
+						ds.hlzm = ds.vlzm = min(ds.hlzm, ds.vlzm) + 1,
 						fscd = 1;
 					else if (alt)
 						ca_space_sz = ca_space_sz + 1;
 					else
 						ca_space_sz = ca_space_sz * 2;
+					
 					break;
-				case SDLK_MINUS:
-					if (ctl)
-						ds.hlzm = ds.vlzm = min(ds.hlzm, ds.vlzm) - 1,
-						fscd = 1;
-					else if (sft)
+				case SDLK_MINUS:					
+					if (sft)
 						ds.hlpz = ds.vlpz = min(ds.hlpz, ds.vlpz) - 1,
+						fscd = 1;
+					else if (cnmd == CM_HASH) {
+						hc_sl--;
+						hc_sn = hct[hc_sn].ln;
+						//
+						ca_space_sz = ca_space_sz / 2;
+						last_ca_space_sz = ca_space_sz;
+						dyrt = 1;
+					}
+					else if (ctl)
+						ds.hlzm = ds.vlzm = min(ds.hlzm, ds.vlzm) - 1,
 						fscd = 1;
 					else if (alt)
 						ca_space_sz = ca_space_sz - 1;
 					else
 						ca_space_sz = max(1, ca_space_sz / 2);
+					
 					break;
 				case SDLK_TAB:;
 					res = 1;
@@ -5191,16 +5237,27 @@ CA_MAIN(void) {
 					break;
 				}
 				case SDLK_PAGEUP:
-					if (kbms & KMOD_SHIFT)
-						speed += 1;
-					else
-						speed *= 2;
+					if (cnmd == CM_HASH) {
+						sdmrpt++;
+					}
+					else {
+						if (kbms & KMOD_SHIFT)
+							speed += 1;
+						else
+							speed *= 2;
+					}
 					break;
 				case SDLK_PAGEDOWN:
-					if (kbms & KMOD_SHIFT)
-						speed -= 1;
-					else
-						speed /= 2;
+					if (cnmd == CM_HASH) {
+						if (sdmrpt)
+							sdmrpt--;
+					}
+					else {
+						if (kbms & KMOD_SHIFT)
+							speed -= 1;
+						else
+							speed /= 2;
+					}
 					break;
 				case SDLK_LEFT:
 					x_shift--;
@@ -5328,11 +5385,20 @@ CA_MAIN(void) {
 					hc_stats[i].ss = 0;
 				}
 			}
+			double ds;
+			if (cnmd == CM_HASH) {
+				if (sdmrpt)
+					ds = (double)ca_space_sz * 2 * pow(2.0, sdmrpt - 3.0);
+				else
+					ds = 0.0;
+			}
+			else
+				ds = (double)speed;
 			printf("cnmd %s  sz %.2e  sd %.2e  cs %.2e  tm %.2e\n",
 				ca_cnsgs[cnmd].name,
 				(double)ca_space_sz,
-				(double)speed,
-				(double)speed * ca_space_sz / sfw.avg_duration,
+				ds,
+				ds * ca_space_sz / sfw.avg_duration,
 				(double)tm * ca_space_sz);
 			fpstr = 0;
 		}

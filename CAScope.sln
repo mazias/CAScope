@@ -1,14 +1,16 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio Version 17
+VisualStudioVersion = 17.3.32811.315
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "C-Template SDL Application", "C-Template Consoloe Application\C-Template Consoloe Application.vcxproj", "{D28ED6AF-7C9A-425A-AB8E-CB365C813704}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CAScope", "C-Template Consoloe Application\C-Template Consoloe Application.vcxproj", "{D28ED6AF-7C9A-425A-AB8E-CB365C813704}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
 		Debug|x64 = Debug|x64
+		Release - OpenCL Enabled|Win32 = Release - OpenCL Enabled|Win32
+		Release - OpenCL Enabled|x64 = Release - OpenCL Enabled|x64
 		Release|Win32 = Release|Win32
 		Release|x64 = Release|x64
 	EndGlobalSection
@@ -17,6 +19,10 @@ Global
 		{D28ED6AF-7C9A-425A-AB8E-CB365C813704}.Debug|Win32.Build.0 = Release|Win32
 		{D28ED6AF-7C9A-425A-AB8E-CB365C813704}.Debug|x64.ActiveCfg = Debug|x64
 		{D28ED6AF-7C9A-425A-AB8E-CB365C813704}.Debug|x64.Build.0 = Debug|x64
+		{D28ED6AF-7C9A-425A-AB8E-CB365C813704}.Release - OpenCL Enabled|Win32.ActiveCfg = Release - OpenCL Enabled|Win32
+		{D28ED6AF-7C9A-425A-AB8E-CB365C813704}.Release - OpenCL Enabled|Win32.Build.0 = Release - OpenCL Enabled|Win32
+		{D28ED6AF-7C9A-425A-AB8E-CB365C813704}.Release - OpenCL Enabled|x64.ActiveCfg = Release - OpenCL Enabled|x64
+		{D28ED6AF-7C9A-425A-AB8E-CB365C813704}.Release - OpenCL Enabled|x64.Build.0 = Release - OpenCL Enabled|x64
 		{D28ED6AF-7C9A-425A-AB8E-CB365C813704}.Release|Win32.ActiveCfg = Release|Win32
 		{D28ED6AF-7C9A-425A-AB8E-CB365C813704}.Release|Win32.Build.0 = Release|Win32
 		{D28ED6AF-7C9A-425A-AB8E-CB365C813704}.Release|x64.ActiveCfg = Release|x64
@@ -24,5 +30,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {E57859DA-E08F-4A20-BC34-5C037F83EA95}
 	EndGlobalSection
 EndGlobal
