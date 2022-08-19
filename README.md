@@ -30,15 +30,22 @@ This should be no big deal if you have some experience with VS build options.
 If you manage to build it yourself, please make some notes on the process and commit them to the project, so other users have an easier start.
 
 You will find most of the relevant settings in VS here:
-- Settings > Compiler > Additional Include Directories
-- Settings > Linker > Additional Dependencies (lib files)
+- Main Menu > Project > Properties
+then
+- VC++ Directories > Include Directories and Library Directories
+- Linker > Input > Additional Dependencies (lib files)
 
 The dependencies are:
 - SDL2 - https://www.libsdl.org/download-2.0.php
 - SDL2_ttf - https://github.com/libsdl-org/SDL_ttf - I currently use v. 2.0.13
+
+The path to the dependencies is currently provided relative to the CAScope directory as `../_INCLUDES/`. So you should put your dependencies there.
+
+### OpenCL Support **
 - OpenCL - https://www.khronos.org/opencl/ - \
-  This is only used in some experimental code blocks, so if you do not want to install OpenCL, you should be able to just remove the OpenCL dependencies and then delete the few functions from `ca.c` that use them.\
-  If you do want to include OpenCL use v. 1.2 and have a look here: https://stackoverflow.com/questions/28500496/opencl-function-found-deprecated-by-visual-studio
+  OpenCL is currently only used in some experimental code blocks and does not give you any additional features or speed. So you only need to enable it, if you want to do OpenCL developement.
+  To enable or disable OpenCL look for `#define CL_ENABLE` in `ca.c`. Also make sure you select the corresponding build/solution configuration.
+  If you have OpenCL enabled, use v. 1.2 and have a look here: https://stackoverflow.com/questions/28500496/opencl-function-found-deprecated-by-visual-studio
 
 ## Usage
 CAScope can only be controlled by the keyboard.
