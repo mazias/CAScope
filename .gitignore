@@ -362,3 +362,5 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 /C-Template Consoloe Application/Release - OpenCL Enabled/CAScope.tlog
+/C-Template Consoloe Application/Release - OpenCL Enabled
+/Release - OpenCL Enabled

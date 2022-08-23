@@ -15,22 +15,6 @@ typedef unsigned __int64 uint64_t;
 
 #include "color.h"
 
-int32_t log2fix(uint32_t x) {
-	uint32_t ui32 = 0x1FFFCFFF;
-	uint64_t ui64 = 0x1FFFCFFF;
-	printf("%x * 2 >> 3  =  %x\n", ui32, ui32 * 2 >> 0);
-	printf("%I64x * 2 =  %I64x\n", ui64, ui64 * 2);
-	printf("log2fix  %u / %x\n", x, x);
-	//
-	ui32 = 0xFFFFFFFF;
-	ui64 = 0x100000000;
-	if ((uint64_t)ui32 * 2 > ui64)
-		printf("register seems at least 64bit wide\n");
-
-}
-
-
-
 /* MAIN */
 int main(int argc, char* args[]) {
 

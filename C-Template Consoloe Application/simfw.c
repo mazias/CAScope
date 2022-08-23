@@ -1706,10 +1706,10 @@ SIMFW_TestBlockMemoryLayout() {
 			else if (e.type == SDL_KEYDOWN) {
 				switch (e.key.keysym.sym) {
 				case SDLK_PAGEUP:
-					SIMFW_SetSimSize(&simfw, simfw.sim_height * 1.25, simfw.sim_width * 1.25);
+					SIMFW_SetSimSize(&simfw, simfw.sim_height * 5 / 4, simfw.sim_width * 5 / 4);
 					break;
 				case SDLK_PAGEDOWN:
-					SIMFW_SetSimSize(&simfw, simfw.sim_height * 0.75, simfw.sim_width * 0.75);
+					SIMFW_SetSimSize(&simfw, simfw.sim_height * 3 / 4, simfw.sim_width * 3 / 4);
 					break;
 				case SDLK_SPACE: {
 					static int olcc = 0;

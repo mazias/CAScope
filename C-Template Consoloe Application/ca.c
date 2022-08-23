@@ -17,9 +17,9 @@ __inline double random01() {
 }
 
 /* OpenCL */
-//#define ENABLE_CL 1
-// to enable OpenCL also include OpenCL headers in Settings > Compiler > Additional Include Directories and the lib file in Settings > Linker > Additional Dependencies / Zusätzliche Abhängigkeiten
-#ifdef ENABLE_CL 
+#define ENABLE_CL 0
+// to enable OpenCL also select the appropiate build option ("Release OpenCL enabled") include OpenCL headers in Settings > Compiler > Additional Include Directories and the lib file in Settings > Linker > Additional Dependencies / Zusätzliche Abhängigkeiten
+#if ENABLE_CL 
 	#define CL_USE_DEPRECATED_OPENCL_1_2_APIS // https://stackoverflow.com/questions/28500496/opencl-function-found-deprecated-by-visual-studio
 	#include <CL/cl.h>
 #endif
@@ -367,7 +367,7 @@ void print_bits(unsigned char* bytes, size_t num_bytes, int bypr) {
 	printf("]\n");
 }
 
-#ifdef ENABLE_CL 
+#if ENABLE_CL 
 	// **********************************************************************************************************************************
 	// OpenCL
 	// *********************************************************************************************************************************
@@ -1355,14 +1355,13 @@ HCN {
 //	UINT8 ll;								// level
 } HCN;
 HCI hcln[HCTMXLV] = { 0 };					// hash-cells-left-node (used when building hash-table)
-int hcls[HCTMXLV] = { 0 };					// hash-cells-left-node-set boolean (used when building hash-table)
+int hcls[HCTMXLV] = { 0 };					// hash-cells-left-node-set boolean (used when building hash-table) - indicates if a left-node is present in hcln for the given level
 HCN* hct = NULL;							// hash-cell-table
 
 //#define HCISKSZ 256							// hash-cell-stack-size
 //HCI hciskps = 0;							// hash-cell-stack-position
 //HCI hcisk[HCISKSZ] = { 0 };					// hash-cell-stack
 
-//UINT8 hc_cg = 0;							// hash-cell-current-generation
 HCI hc_sn = 0;								// node holding current space
 int hc_sl = 0;								// level of current space
 
@@ -1509,11 +1508,6 @@ HCI convert_bit_array_to_hash_array(caBitArray* vba, int* ll) {
 			ltnd = HC_add_node(0, 1 + ((bya[bi] >> 2) & 0x3), &l);
 			ltnd = HC_add_node(0, 1 + ((bya[bi] >> 4) & 0x3), &l);
 			ltnd = HC_add_node(0, 1 + ((bya[bi] >> 6) & 0x3), &l);
-			//ltnd = HC_add_node(1, 1 + ((((bya[bi] >> 0) & 0x3) << 2) | (((bya[bi] >> 2) & 0x3) << 0)), &l);
-			//ltnd = HC_add_node(1, 1 + ((((bya[bi] >> 4) & 0x3) << 2) | (((bya[bi] >> 6) & 0x3) << 0)), &l);
-
-			//ltnd = HC_add_node(1, 1 + ((bya[bi] >> 0) & 0xF), &l);
-			//ltnd = HC_add_node(1, 1 + ((bya[bi] >> 4) & 0xF), &l);
 			if (l > ml)
 				ml = l;
 		}
@@ -1626,10 +1620,10 @@ UINT32* display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, int 
 /*
 ll		level
 dh		(calling-)depth
-ln		left node
-rn		right node
-rt		unless null, will be set to the result node of the found or added branch
-returns index of found or added branch
+ln		left node	- MUST have a positive uc (usage count), otherwise there is the possibility of it to be overwritten when searching for an empty node
+rn		right node	- MUST have a positive uc (usage count), otherwise there is the possibility of it to be overwritten when searching for an empty node
+rt		unless null, will be set to the result node of the found or added branch - guaranteed to have a uc (usage count) greater than 0
+returns index of found or added branch - if newly created this will have a uc (usage count) of 0
 */
 HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 	HCI cm;										// checksum
@@ -1666,9 +1660,9 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 				hc_stats[ll].fc++;
 				break;
 			}
-			// Unused node found at checksum-index > recycle (delete unused node)
 			else {
 				UINT32 cnll = (hct[cm].uc & HCLLMK) >> 24;	// current-node-level
+				// Unused node found at checksum-index > recycle (delete unused node)
 				if ((!encm || cnll > enll) && (hct[cm].uc & HCUCMK) == 0) {
 					encm = cm;
 					enll = cnll;
@@ -1746,6 +1740,8 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 
 
 /* IN DEVELOPMENT! */
+// try to make other speeds possible than 2^n*(space-size / 2)
+/*
 HCI HC_NG(int ll, int64_t* tm, HCI ln, HCI rn) {
 	HCI rt;
 	if (!tm) {
@@ -1768,6 +1764,7 @@ HCI HC_NG(int ll, int64_t* tm, HCI ln, HCI rn) {
 		rt = HC_find_or_add_branch(ll, nl, nr, NULL);
 	}
 }
+*/
 
 int64_t CA_CNFN_HASH(int64_t pgnc, caBitArray* vba) {
 	for (int i = 0; i < HCTMXLV - 2; i++) {
@@ -1778,7 +1775,7 @@ int64_t CA_CNFN_HASH(int64_t pgnc, caBitArray* vba) {
 		hc_stats[i].ss = 0;
 	}
 
-	HCI rtnd;		// result node
+	HCI rtnd = NULL;		// result node
 	///	while (pgnc >= (int64_t)(HCTBS / 2) << hc_sl) {
 	if (sdmrpt) {
 		// Scale up space/size to allow calculate needed time
@@ -1821,21 +1818,28 @@ ll		level
 mxll*	max-level
 
 returns last added (and therefore top-most) node
+
+NOTE on reference count (uc): 
+If a left node is added (uncomplete branch) its uc is at least 1
+If a right node is added (branch is complete) the uc of left and right is decremented by one, but a new left node one level up is added which has an uc of at least 1
+> use hct[result_node].uc &= HCLLMK;  to reset uc for last returned node
 */
 HCI HC_add_node(int ll, HCI n, int* mxll) {
 #define D 0				// debug-mode
-
-	char indent[HCTMXLV * 2 + 1];
-	memset(indent, ' ', HCTMXLV * 2);
-	indent[ll * 2] = 0;
-
-	if (D) printf("%sN l %d  n 0x%04X\n", indent, ll, n), getch();
+	#if D
+		char indent[HCTMXLV * 2 + 1];
+		memset(indent, ' ', HCTMXLV * 2);
+		indent[ll * 2] = 0;
+		printf("%sN l %d  n 0x%04X  (press any key to continue)\n", indent, ll, n);
+		getch();
+	#endif
 
 	// Add Node to branch.
 	if (hcls[ll] == 0) {
 		// Branch is empty > add first node and wait for the seconde one
 		hcln[ll] = n;
-		if (ll) hct[n].uc++;
+		if (ll) 
+			hct[n].uc++;
 		hcls[ll] = 1;
 		return n;
 	}
@@ -1843,7 +1847,8 @@ HCI HC_add_node(int ll, HCI n, int* mxll) {
 		*mxll = ll;
 		HCI ln = hcln[ll];							// left-node
 		HCI rn = n;									// right-node
-		if (ll) hct[n].uc++;
+		if (ll) 
+			hct[n].uc++;
 		HCI nn;										// new-node
 		static HCI tn = 0;
 		hcls[ll] = 0;
@@ -1998,7 +2003,8 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 	printf("hash init 2\n");
 	hc_sn = convert_bit_array_to_hash_array(vba, &hc_sl);
 	printf("hash init 3  ll %d  hc_sn %04x  uc %d  uc-ll %d\n", hc_sl, hc_sn, hct[hc_sn].uc & HCUCMK, hct[hc_sn].uc & HCLLMK);
-	hct[hc_sn].uc &= HCLLMK;		// set usage-count to zero but keep value of level
+	if (hc_sl)
+		hct[hc_sn].uc &= HCLLMK;		// set usage-count to zero but keep value of level
 	HC_print_stats(0);
 
 	//print_bits(vba->v, vba->scsz / 8, 4);
@@ -2113,11 +2119,11 @@ int64_t CA_CNFN_DISABLED(int64_t pgnc, caBitArray* vba) {
 	return 0;
 }
 
-#ifdef ENABLE_CL 
+#if ENABLE_CL 
 	static OCLCA oclca = { -1, NULL, NULL, NULL };
 #endif
 void CA_CNITFN_OPENCL(caBitArray* vba, CA_RULE* cr) {
-	#ifdef ENABLE_CL 
+	#if ENABLE_CL 
 		if (oclca.success != CL_SUCCESS)
 			oclca = OCLCA_Init("../opencl-vba.cl");
 	#else
@@ -2544,7 +2550,7 @@ int64_t CA_CNFN_VBA_2x256(int64_t pgnc, caBitArray* vba) {
 }
 
 int64_t CA_CNFN_OPENCL(int64_t pgnc, caBitArray* vba) {
-	#ifdef ENABLE_CL 
+	#if ENABLE_CL 
 		OCLCA_RunVBA(pgnc, 0/*res*/, oclca, vba->cr, *vba, 1/*de*/, 16/*klrg*/);
 		pgnc = 0;
 		convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
@@ -3553,10 +3559,11 @@ lifeanddrawnewcleanzoom(
 	/* Warn if hash-computation-mode is used with inappropiate settings */
 	if (cnmd == CM_HASH && !ds.sfcm)
 		printf("WARNING you need to enable screen-filling-curve-mode when using hash-computation-mode!\n");
-	if (cnmd == CM_HASH && tm < scsz / 2)
-		printf("WARNING speed must at least be half of space-size when using hash-computation-mode!\n");
-	if (cnmd == CM_HASH && ((tm & (tm - 1)) != 0 || (scsz & (scsz - 1)) != 0))
-		printf("WARNING speed and size must be power of 2 when using hash-computation-mode!\n");
+// i guess not needed anymore, since sdmrpt is used in hash mode to control speed
+//	if (cnmd == CM_HASH && tm < scsz / 2)
+//		printf("WARNING speed must at least be half of space-size when using hash-computation-mode!  tm %d\n", tm);
+//	if (cnmd == CM_HASH && ((tm & (tm - 1)) != 0 || (scsz & (scsz - 1)) != 0))
+//		printf("WARNING speed and size must be power of 2 when using hash-computation-mode!\n");
 
 	/* Init vars and defines */
 	ds.lgm %= 2;
@@ -4918,117 +4925,175 @@ CA_MAIN(void) {
 						res = 1;
 					}
 				}
-
-				// random
+				/* No control-mode selected */
+				// insert random cells
 				if (keysym >= SDLK_0 && keysym <= SDLK_9) {
-					tm = 0;
-					int rcc = 0;							// random cells count
-					int ps = 1;								// pattern size
-					if (alt)
-						ps = 0;
-					if (kbms & KMOD_SHIFT)
-						// 1 = random cells 10% of width, 2 = 20%, 9 = 90%, 0 = 100%
-						rcc = ca_space_sz * (keysym - SDLK_0 + (keysym == SDLK_0) * 10) / 10;
-					else {
-						// 0 = 1 random cell, 1 = 2, 2 = 4, 3 = 8, ..., 9 = 512
-						rcc = ipow(2, keysym - SDLK_0);
-						if (keysym == SDLK_0)
-							rcc = 0;
-					}
-
-					if (ctl) {
-						// random isles of variing length
-						//int br = pcg32_boundedrand(cr.ncs);
-						//for (int i = 0; i < ca_space_sz; ++i)
-						//	ca_space[i] = br;
-						if (1 || keysym == SDLK_9) {
-							CA_CT* cc = ca_space;
-							CA_CT* ci = ca_space + ca_space_sz;
-							int szsr = keysym - SDLK_0;
-							if (szsr == 0)
-								szsr = 10;
-							szsr *= 64;
-							int sz = ca_space_sz / szsr, sg = sz * 8;
-							while (cc + sz < ci) {
-								int rsz = ceil(log2(sz));
-								printf("rsz %d", rsz);
-								rsz = pcg32_boundedrand(rsz) + 2;
-								rsz = ipow(2, rsz);
-								printf("/%d\n", rsz);
-								// random cells
-								for (int i = 0; i < rsz; ++i) {
-									*cc = pcg32_boundedrand(cr.ncs);
-									++cc;
-								}
-								// spacing
-									// background cells
-								//int bd = pcg32_boundedrand(cr.ncs);								// center 
-								//for (int ii = 0; ii < sg; ++ii) {
-								//	if (cc >= ci)
-								//		goto rme;
-								//	*cc = bd;
-								//	++cc;
-								//}
-								cc += sg;
-							}
+					// special handling if computation-mode is hash
+					if (cnmd == CM_HASH) {
+//assert(HCTBSPT == 2 && "HCTBSPT must be 2"); // TODO why does this not compile???
+						int rs = HCTBS * ipow(2, min(hc_sl, keysym - SDLK_0));				// random size in nr. of cells
+						memset(&hcls, 0, sizeof(hcls));				// reset hash-cells-set (even if this probably may not be necesary)
+						// create a random hash-node of given size
+						HCI rmnd;									// last-node
+						int ml = 0;									// max-level
+						for (int i = 0; i < rs; i += HCTBS) {
+							uint32_t rbs = pcg32_random();			// generate 32 bits of randomnes
+							int l = 0;								// level
+							rmnd = HC_add_node(0, 1 + ((rbs >> 0) & 0x3), &l);
+							rmnd = HC_add_node(0, 1 + ((rbs >> 2) & 0x3), &l);
+							if (l > ml)
+								ml = l;
 						}
-						else if (keysym == SDLK_0) {
-							CA_CT* cc = ca_space;
-							CA_CT* ci = ca_space + ca_space_sz;
-							int rg = 10, sg = rg * 10, ct = 100;
-							while (1) {
-								for (int i = 0; i < ct; ++i) {
+						if (ml)
+							hct[rmnd].uc &= HCLLMK;						// set usage-count to zero but keep value of level (see notes on HC_add_node on why this is done)
+						// select a random node the same level as ml
+						HCI hcbt[HCTMXLV] = { 0 };					// hash-node-backtrack array
+						int hcbtln[HCTMXLV] = { 0 };				// hash-node-backtrack-left-node-taken array
+						int bti = 0;								// backtrack-index
+						HCI cn = hc_sn;								// current node
+						int cl = hc_sl;								// current level
+						while (cl > ml) {
+							// remember path taken
+							hcbt[bti] = cn;
+							// randomly select left or right node
+							cl--;
+							if (ctl || (pcg32_random() & 1)) {
+								cn = hct[cn].ln;
+								hcbtln[bti] = 1;
+							}
+							else
+								cn = hct[cn].rn;
+							bti++;
+						}
+						// exchange selected node with the randomly created note and update all parent nodes
+						cn = rmnd;
+						for (int i = bti - 1; i >= 0; i--) {
+							cl++;
+							HCI tcn = cn;
+							hct[cn].uc++;
+							if (hcbtln[i])
+								cn = HC_find_or_add_branch(cl, cn, hct[hcbt[i]].rn, NULL);
+							else
+								cn = HC_find_or_add_branch(cl, hct[hcbt[i]].ln, cn, NULL);
+							hct[tcn].uc--;
+							//
+						}
+//						hct[hc_sn].uc--;
+						hc_sn = cn;
+//						hct[hc_sn].uc++;
+						//
+						SIMFW_SetFlushMsg(&sfw, "hash-cells random size  %d  (use ctl to select leftmost node)\n", rs);
+					}
+					else {
+						tm = 0;
+						int rcc = 0;							// random cells count
+						int ps = 1;								// pattern size
+						if (alt)
+							ps = 0;
+						if (kbms & KMOD_SHIFT)
+							// 1 = random cells 10% of width, 2 = 20%, 9 = 90%, 0 = 100%
+							rcc = ca_space_sz * (keysym - SDLK_0 + (keysym == SDLK_0) * 10) / 10;
+						else {
+							// 0 = 1 random cell, 1 = 2, 2 = 4, 3 = 8, ..., 9 = 512
+							rcc = ipow(2, keysym - SDLK_0);
+							if (keysym == SDLK_0)
+								rcc = 0;
+						}
+
+						if (ctl) {
+							// random isles of variing length
+							//int br = pcg32_boundedrand(cr.ncs);
+							//for (int i = 0; i < ca_space_sz; ++i)
+							//	ca_space[i] = br;
+							if (1 || keysym == SDLK_9) {
+								CA_CT* cc = ca_space;
+								CA_CT* ci = ca_space + ca_space_sz;
+								int szsr = keysym - SDLK_0;
+								if (szsr == 0)
+									szsr = 10;
+								szsr *= 64;
+								int sz = ca_space_sz / szsr, sg = sz * 8;
+								while (cc + sz < ci) {
+									int rsz = ceil(log2(sz));
+									printf("rsz %d", rsz);
+									rsz = pcg32_boundedrand(rsz) + 2;
+									rsz = ipow(2, rsz);
+									printf("/%d\n", rsz);
 									// random cells
-									for (int ii = 0; ii < rg; ++ii) {
-										if (cc >= ci)
-											goto rme;
+									for (int i = 0; i < rsz; ++i) {
 										*cc = pcg32_boundedrand(cr.ncs);
 										++cc;
 									}
-									// background cells
-									int bd = pcg32_boundedrand(cr.ncs);								// center 
-									for (int ii = 0; ii < sg; ++ii) {
-										if (cc >= ci)
-											goto rme;
-										*cc = bd;
-										++cc;
-									}
+									// spacing
+										// background cells
+									//int bd = pcg32_boundedrand(cr.ncs);								// center 
+									//for (int ii = 0; ii < sg; ++ii) {
+									//	if (cc >= ci)
+									//		goto rme;
+									//	*cc = bd;
+									//	++cc;
+									//}
+									cc += sg;
 								}
-								//
-								rg *= 2;
-								sg *= 2;
-								ct = max(1, ct / 2);
 							}
-						rme:;
+							else if (keysym == SDLK_0) {
+								CA_CT* cc = ca_space;
+								CA_CT* ci = ca_space + ca_space_sz;
+								int rg = 10, sg = rg * 10, ct = 100;
+								while (1) {
+									for (int i = 0; i < ct; ++i) {
+										// random cells
+										for (int ii = 0; ii < rg; ++ii) {
+											if (cc >= ci)
+												goto rme;
+											*cc = pcg32_boundedrand(cr.ncs);
+											++cc;
+										}
+										// background cells
+										int bd = pcg32_boundedrand(cr.ncs);								// center 
+										for (int ii = 0; ii < sg; ++ii) {
+											if (cc >= ci)
+												goto rme;
+											*cc = bd;
+											++cc;
+										}
+									}
+									//
+									rg *= 2;
+									sg *= 2;
+									ct = max(1, ct / 2);
+								}
+							rme:;
 
-							//CA_CT *ca = ca_space;
-							//int rg = ca_space_sz;
-							//int dy = 32;		// inverse density (1/dy)
-							//while (ca + rg < ca_space + ca_space_sz + 1) {
-							//	printf("rg %d   ca %d\n", rg, ca - ca_space);
-							//	for (CA_CT *cs = ca + rg / dy; ca < cs; ++ca)				// fill 
-							//		*ca = pcg32_boundedrand(cr.ncs);								// with random cells
-							//	int bd = pcg32_boundedrand(cr.ncs);								// center 
-							//	for (CA_CT *cs = ca + rg / dy; ca < cs; ++ca)			// fill seconde half
-							//		*ca = bd;											// with background-state
-							//	if (rg < dy)
-							//		break;
-							//	rg = rg - rg / dy * 2;
-							//}
-						}
-						else {
-							for (int i = 0; i < keysym - SDLK_0 + 1; ++i) {
-								int pos = pcg32_boundedrand(ca_space_sz);
-								int lh = ipow(2, pcg32_boundedrand(3) + 6);
-								printf("rdm  %d - %d\n", pos % ca_space_sz, lh);
-								for (int i = 0; i < lh; ++i)
-									*(ca_space + (pos + i) % ca_space_sz) = pcg32_boundedrand(cr.ncs);
+								//CA_CT *ca = ca_space;
+								//int rg = ca_space_sz;
+								//int dy = 32;		// inverse density (1/dy)
+								//while (ca + rg < ca_space + ca_space_sz + 1) {
+								//	printf("rg %d   ca %d\n", rg, ca - ca_space);
+								//	for (CA_CT *cs = ca + rg / dy; ca < cs; ++ca)				// fill 
+								//		*ca = pcg32_boundedrand(cr.ncs);								// with random cells
+								//	int bd = pcg32_boundedrand(cr.ncs);								// center 
+								//	for (CA_CT *cs = ca + rg / dy; ca < cs; ++ca)			// fill seconde half
+								//		*ca = bd;											// with background-state
+								//	if (rg < dy)
+								//		break;
+								//	rg = rg - rg / dy * 2;
+								//}
+							}
+							else {
+								for (int i = 0; i < keysym - SDLK_0 + 1; ++i) {
+									int pos = pcg32_boundedrand(ca_space_sz);
+									int lh = ipow(2, pcg32_boundedrand(3) + 6);
+									printf("rdm  %d - %d\n", pos % ca_space_sz, lh);
+									for (int i = 0; i < lh; ++i)
+										*(ca_space + (pos + i) % ca_space_sz) = pcg32_boundedrand(cr.ncs);
+								}
 							}
 						}
+						else
+							CA_RandomizeSpace(ca_space, ca_space_sz, cr.ncs, rcc, ps);
+						res = 1;
 					}
-					else
-						CA_RandomizeSpace(ca_space, ca_space_sz, cr.ncs, rcc, ps);
-					res = 1;
 				}
 				//
 				else switch (keysym) {
@@ -5127,12 +5192,51 @@ CA_MAIN(void) {
 					tm = 0;
 					res = 1;
 					break;
+				case SDLK_BACKSPACE:
+					if (cnmd == CM_HASH) {
+						if (ctl) {
+							hct[hc_sn].uc++;
+							int dc = 0;		// deleted-count
+							for (HCI i = 0; i < HCISZ; i++) {
+								if (hct[i].ln && !(hct[i].uc & HCUCMK)) {
+									dc++;
+									hct[hct[i].ln].uc--;
+									hct[hct[i].rn].uc--;
+									hct[hct[i].r].uc--;
+									hct[i].ln = 0;
+									int rcll = (hct[i].uc & HCLLMK) >> 24;	// recycled-node-level	
+									hc_stats[rcll].nc--;
+									hc_stats[rcll].rcct++;
+								}
+							}
+							hct[hc_sn].uc--;
+							SIMFW_SetFlushMsg(&sfw, "checked  %d  hash-cells, deleted  %d", HCISZ, dc);
+
+						}
+						else {
+							HCI en;		// empty node
+							// build empty node with the same size as current ca
+							en = HC_find_or_add_branch(0, 1, 1, NULL);
+							for (int i = 1; i <= hc_sl; i++) {
+								hct[en].uc++;
+								HCI tn = HC_find_or_add_branch(i, en, en, NULL);
+								hct[en].uc--;
+								en = tn;
+							}
+							// replace current ca with empty node
+						//	hct[hc_sn].uc--;
+							hc_sn = en;
+//							hct[hc_sn].uc++;
+							SIMFW_SetFlushMsg(&sfw, "cell-space cleared");
+						}
+					}
+					break;
 				case SDLK_PLUS:					
 					if (sft)
 						ds.hlpz = ds.vlpz = min(ds.hlpz, ds.vlpz) + 1,
 						fscd = 1;
 					else if (cnmd == CM_HASH) {
-						HCI en;		// empty node
+						HCI en;		// new (empty or copied) node
 						if (ctl) {
 							// build empty node with the same size as current ca
 							en = HC_find_or_add_branch(0, 1, 1, NULL);
@@ -5144,15 +5248,24 @@ CA_MAIN(void) {
 							}
 						}
 						else
+							// copy the whole current cell-space
 							en = hc_sn;
-						// connect current ca with empty node
+						//// connect current ca with empty node
+						//hc_sl++;
+						//hct[hc_sn].uc++;
+						//hct[en].uc++;
+						//HCI hn = HC_find_or_add_branch(hc_sl, hc_sn, en, NULL);
+						//hct[hc_sn].uc--;
+						//hct[en].uc--;
+						//hc_sn = hn;
+						// connect current ca with new (empty or copied) node
 						hc_sl++;
-						hct[hc_sn].uc++;
-						hct[en].uc++;
+						hct[en].uc++;	// hc_sn should already have a positive uc
 						HCI hn = HC_find_or_add_branch(hc_sl, hc_sn, en, NULL);
-						hct[hc_sn].uc--;
 						hct[en].uc--;
+//						hct[hc_sn].uc--;
 						hc_sn = hn;
+//						hct[hc_sn].uc++;
 						//
 						ca_space_sz = ca_space_sz * 2;
 						last_ca_space_sz = ca_space_sz;
