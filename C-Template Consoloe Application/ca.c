@@ -68,6 +68,7 @@ typedef struct caDisplaySettings {
 	unsigned int pnp;								// pixel-screen pitch // currently ignored
 	int sfcm;										// screen-filling-curve-mode
 	int sfcsw;										// screen-filling-curve-step-width
+	int sfcmp;										// screen-filling-curve-mode-paramter
 	int vlfs;										// focus > nr. of hlfs cells next to eachother are summed... TODO 
 	int hlfs;										// focus > nr. of hlfs cells next to eachother are summed... TODO 
 	int vlzm;										// vertical zoom - how many vertical cells will make out one pixel (together with hor. zoom); 0 = disable drawing, < 0 = how many vertical pixels a cell will make out
@@ -76,7 +77,6 @@ typedef struct caDisplaySettings {
 	int hlpz;										// horizontal pixel zoom
 	int stzm;										// state zoom - 0 = direct zoom on intensity
 	int sm;											// scanline-mode
-	int mdpm;										// mode-paramter (used by sfcm-modes)
 	int hddh;										// hash-display-depth
 	int hdll;										// hash-display-level
 	int mlsc;										// manual shift correction
@@ -2681,7 +2681,8 @@ struct {
 #define CS_PRF_WIN_SZ	0xFF			// prefered window-size - used by row>col / col>row conversion functions
 
 /* reverse: reverse string s in place */
-void reverse(char s[])
+void
+reverse(char s[])
 {
 	int c, i, j;
 	for (i = 0, j = strlen(s) - 1; i < j; i++, j--) {
@@ -2743,18 +2744,18 @@ CA_RULE_PrintInfo(CA_RULE* cr, char* os, size_t sgsz) {
 
 	// go through all neighborhod-states
 	for (int i = 0; i < ipow(cr->ncs, cr->ncn); ++i) {
-		int nst = i; // neighborhod-state
-		char snst[100] = "";	// string neighborhod-state
-		int rds = 0; // reduced neighborhod-state
+		int nst = i;											// neighborhod-state
+		const char snst[100] = "";								// string neighborhod-state
+		int rds = 0;											// reduced neighborhod-state
 		// go through all neighbor-cells
 		for (int k = 0; k < cr->ncn; ++k) {
 			// extract state of rightmost neighbor
-			int rns = nst % cr->ncs; // rightmost-neighbor-state
+			int rns = nst % cr->ncs;							// rightmost-neighbor-state
 			nst /= cr->ncs;
 			// reduce neighborhod-state
-			if (cr->tp == TOT) // totalistic
+			if (cr->tp == TOT)									// totalistic
 				rds += rns;
-			else if (cr->tp == ABS) // absolute
+			else if (cr->tp == ABS)								// absolute
 				rds += ipow(cr->ncs, cr->ncn - k - 1) * rns;
 			// print
 			sprintfa_s(snst, sizeof(snst), "%d", rns); // actually displays it in wrong order, i.e. rightmost neighbor is printed leftmost > has to be reversed before displaying		
@@ -3827,7 +3828,7 @@ lifeanddrawnewcleanzoom(
 			}
 			/* Screen-filling-curve-modes */
 			else if (ds.sfcm <= 4)
-				display_2d_matze(pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcm - 1, ds.mdpm);
+				display_2d_matze(pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcm - 1, ds.sfcmp);
 			else if (ds.sfcm < 5 + LMS_COUNT)
 				display_2d_lindenmeyer(LMSA[ds.sfcm - 5], pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcsw, -1, NULL, NULL, NULL);
 			else
@@ -4360,7 +4361,7 @@ CA_MAIN(void) {
 	ds.hlzm = 1;				/* horizontal zoom */
 	ds.vlpz = 1;				/* vertical pixel zoom */
 	ds.hlpz = 1;				/* horizontal pixel zoom */
-	ds.mdpm = 0;
+	ds.sfcmp = 0;
 	ds.hddh = -1;
 	ds.hdll = 0;
 	ds.mlsc = 0;
@@ -4529,7 +4530,7 @@ CA_MAIN(void) {
 		//
 		nkb = eikb;
 		nkb.name = "screen-filling-curve-mode-parameter";
-		nkb.val = &ds.mdpm;
+		nkb.val = &ds.sfcmp;
 		nkb.cgfg = &dyrt;
 		nkb.slct_key = SDLK_g;
 		nkb.min = 0; nkb.max = 4096;
@@ -5112,7 +5113,7 @@ CA_MAIN(void) {
 							cr.rl++;
 						cr = CA_Rule(cr);
 						CA_RandomizeSpace(ca_space, ca_space_sz, cr.ncs, ca_space_sz / ipow(2, pcg32_boundedrand(10)), 3);
-						char buf[10000];
+						char buf[10000] = "";
 						CA_RULE_PrintInfo(&cr, &buf, sizeof(buf));
 						SIMFW_SetFlushMsg(&sfw, &buf);
 						res = 1;
@@ -5186,7 +5187,7 @@ CA_MAIN(void) {
 
 					cr = CA_Rule(cr);
 					CA_RandomizeSpace(ca_space, ca_space_sz, cr.ncs, ipow(2, pcg32_boundedrand(10)), 3);
-					char buf[10000];
+					char buf[10000] = "";
 					CA_RULE_PrintInfo(&cr, &buf, sizeof(buf));
 					SIMFW_SetFlushMsg(&sfw, &buf);
 					tm = 0;
@@ -5423,23 +5424,26 @@ CA_MAIN(void) {
 					int nwsz = ca_space_sz;
 					CA_CT* nwsc = NULL;									// new space
 					nwsc = malloc(nwsz * sizeof * nwsc);				// memory allocation for new space
-					for (int i = 0; i < nwsz; ++i)						// init new space to 0
-						nwsc[i] = 0;
-					tm = 0;
-					/* Copy old space into new space - centered */
-					memcpy(
-						max(nwsc, nwsc + (nwsz - last_ca_space_sz) / 2),
-						max(ca_space, ca_space + (last_ca_space_sz - nwsz) / 2),
-						min(nwsz, last_ca_space_sz));
+					if (!nwsc)
+						SIMFW_Die("malloc failed at %s (:%d)\n", __FUNCSIG__, __LINE__);
+					else {
+						memset(nwsc, 0, nwsz * sizeof * nwsc);				// init new space to 0
+						tm = 0;
+						/* Copy old space into new space - centered */
+						memcpy(
+							max(nwsc, nwsc + (nwsz - last_ca_space_sz) / 2),
+							max(ca_space, ca_space + (last_ca_space_sz - nwsz) / 2),
+							min(nwsz, last_ca_space_sz));
 
 
-					free(ca_space);										// release memory of old space
+						free(ca_space);										// release memory of old space
 
-					speed = speed * 1.0 * nwsz / last_ca_space_sz;
+						speed = speed * 1.0 * nwsz / last_ca_space_sz;
 
-					ca_space_sz = last_ca_space_sz = nwsz;				// remember new size
-					ca_space = nwsc;									// set new space as current
-					res = 1;
+						ca_space_sz = last_ca_space_sz = nwsz;				// remember new size
+						ca_space = nwsc;									// set new space as current
+						res = 1;
+					}
 				}
 
 				if (1 && (fscd || szcd || speed != org_speed))
@@ -5592,7 +5596,6 @@ NEWDIFFUSION() {
 		/* Manipulate simulation canvas pixels */
 		double* cc = dpv; // current cell in past values
 		uint32_t* px = simfw.sim_canvas; // current pixel
-
 		double ltmn = mn;	// last min
 		double rg = max(1.0, mx - mn); // range
 		mx = -DBL_MAX, mn = DBL_MAX;
@@ -5626,7 +5629,7 @@ NEWDIFFUSION() {
 					if (lv < mn)
 						mn = lv;
 					uint8_t v;
-					v = (lv - ltmn) / rg * 0xFF * 10;
+					v = (uint8_t)((lv - ltmn) / rg * 0xFF * 10);
 					*px = v << 16 | v << 8 | v;
 					++cc,
 						++px,
@@ -5668,7 +5671,7 @@ NEWDIFFUSION() {
 						if (lv < mn)
 							mn = lv;
 						uint8_t v;
-						v = (lv - ltmn) / rg * 0xFF * 10;
+						v = (uint8_t)((lv - ltmn) / rg * 0xFF * 10);
 						*px = v << 16 | v << 8 | v;
 					}
 					++cc,
@@ -5677,7 +5680,7 @@ NEWDIFFUSION() {
 				}
 				else if (MODE == 3) {
 					// very simple diffusion
-					double dif;
+					//double dif;
 					*cfv = *cc;
 					// N
 					//*cfv -= (*cc - *(cc - W)) / 4;
@@ -5707,7 +5710,7 @@ NEWDIFFUSION() {
 					if (lv < mn)
 						mn = lv;
 					uint8_t v;
-					v = (lv - ltmn) / rg * 0xFF * 4;
+					v = (uint8_t)((lv - ltmn) / rg * 0xFF * 4);
 					*px = v << 16 | v << 8 | v;
 					++cc,
 						++px,
@@ -5880,7 +5883,7 @@ ONED_DIFFUSION(void) {
 		SIMFW_Scroll(&simfw, 0, -yspeed * scsz);
 
 		/* Draw new lines */
-		double mn, mx;
+		double mn = 0, mx = 0;
 		for (int rt = 0; rt < yspeed; ++rt) {
 			/* get min/max */
 			mn = DBL_MAX, mx = DBL_MIN;
@@ -5894,8 +5897,7 @@ ONED_DIFFUSION(void) {
 			double sl = 1.0 / (log(mx) - lgmn);	// scale
 			for (int i = 0; i < scsz; ++i) {
 				unsigned char bw;
-				bw = 255 * (dwnr - dwnr * sl * (log(ans[i]) - lgmn));
-				bw = 255 - bw;
+				bw = 255 - (unsigned char)(255 * (dwnr - dwnr * sl * (log(ans[i]) - lgmn)));
 				*px = bw << 16 | bw << 8 | bw;
 				++px;
 			}
@@ -5924,7 +5926,7 @@ ONED_DIFFUSION(void) {
 
 		/* Update status and screen */
 		SIMFW_SetStatusText(&simfw,
-			"SIMFW TEST   fps %.2f  sd %.2f\nmn %.2e/%.2e  mx %.2e/%.2e    moude %.2e/%.2e\n%.4f",
+			"SIMFW TEST   fps %.2f  sd %.2f\nmn %.2e/%.2e  mx %.2e/%.2e    mouse %.2e/%.2e\n%.4f",
 			1.0 / simfw.avg_duration,
 			1.0 * yspeed,
 			mn, log(mn), mx, log(mx), ans[mouse_x], log(ans[mouse_x]),
@@ -5936,23 +5938,3 @@ behind_sdl_loop:
 	/* Cleanup */
 	SIMFW_Quit(&simfw);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

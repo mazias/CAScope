@@ -76,4 +76,5 @@ void SIMFW_DisplayKeyBindings(SIMFW *sfw);
 Uint32 SIMFW_GetMouseState(SIMFW *sfw,int *y,int *x);
 void SIMFW_SetSimSize(SIMFW *simfw,int height,int width);
 void SIMFW_DbgMsg(const char *format,...);
+void SIMFW_Die(const char *format,...);
 #define INTERFACE 0
