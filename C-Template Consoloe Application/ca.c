@@ -1330,7 +1330,7 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 typedef UINT32 HCI;							// hash-cell-index-type
 #define HCITPBYC 4							// hash-cell-index-type-byte-count
 UINT32 HCISZPT = 20;						// hash-cell-index-size as power of two, i.e. 8 = index size of 256;
-UINT32 HCMXSC = 20;							// hash-cell-maximum-seek-count
+UINT32 HCMXSC = 8;							// hash-cell-maximum-seek-count
 #define HCTMXLV	128							// hash-cell-table-max-level
 
 #define HCTBSPT	2							// hash-cell-table-base-size as power of two -- MUST BE 2 ATM
@@ -4343,7 +4343,7 @@ CA_MAIN(void) {
 	ds.ar = 3;
 	ds.ard = 0.1;
 	ds.arf = 0.1;
-	ds.cm = 3;
+	ds.cm = 2;
 	ds.crct = 0;
 	ds.gm = 1;
 	ds.lgm = 1;
@@ -4373,9 +4373,9 @@ CA_MAIN(void) {
 	CA_RULE cr = CA_RULE_EMPTY;		/* ca configuration */
 									// rule 153 (3 states) und  147 (2 states absolut) ähnlich 228!
 									// neuentdeckung: rule 10699 mit 3 nb
-	cr.rl = 228;//  3097483878567;// 1598;// 228; // 228;// 3283936144;// 228;// 228;// 90;// 30;  // 1790 Dup zu 228! // 1547 ähnliche klasse wie 228
-	cr.tp = TOT;
-	cr.ncs = 3;
+	cr.rl = 54;//  3097483878567;// 1598;// 228; // 228;// 3283936144;// 228;// 228;// 90;// 30;  // 1790 Dup zu 228! // 1547 ähnliche klasse wie 228
+	cr.tp = ABS;
+	cr.ncs = 2;
 	cr.ncn = 3;
 
 	int window_x_position = -1;
