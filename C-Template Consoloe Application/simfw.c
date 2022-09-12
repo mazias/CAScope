@@ -623,7 +623,16 @@ SIMFW_Init(SIMFW *simfw, const char *window_title, int window_height, int window
 	}
 	if (!(simfw->font = TTF_OpenFont("FreeMonoBold.ttf", SIMFW_FONTSIZE))) {
 		printf("TTF_OpenFont failed: %s\n", TTF_GetError());
-		return simfw;
+		// print current directory
+		char* p;
+		p = getcwd(NULL, 0);
+		if (p != NULL)
+		{
+			printf("The current directory is: %s", p);
+			free(p);
+		}
+		printf("\n(Press any key to continue)\n");
+		getch();
 	}
 
 	/* Init key bindings */
