@@ -38,22 +38,26 @@ then
 - Linker > Input > Additional Dependencies (lib files)
 
 The path to the dependencies is currently provided relative to the CAScope directory as `../_INCLUDES/`. So you should put your dependencies there. The directories are named version-neutral, i.e.:
+
 - SDL2
 - SDL2_ttf
+
 I suggest you symlink these to the actual directories provided by the developers (see below).
 
+
+
 The dependencies are (links to latest version that is working):
-- SDL2
--- https://github.com/libsdl-org/SDL/releases/download/release-2.24.0/SDL2-devel-2.24.0-VC.zip (development files)
--- https://github.com/libsdl-org/SDL/releases/download/release-2.24.0/SDL2-2.24.0-win32-x86.zip (windows release files)
-- SDL2_ttf - https://github.com/libsdl-org/SDL_ttf - I currently use v. 2.0.13
--- https://github.com/libsdl-org/SDL_ttf/releases/download/release-2.20.1/SDL2_ttf-devel-2.20.1-VC.zip (development files)
--- https://github.com/libsdl-org/SDL_ttf/releases/download/release-2.20.1/SDL2_ttf-2.20.1-win32-x86.zip (windows release files)
+- SDL2 development files:         https://github.com/libsdl-org/SDL/releases/download/release-2.24.0/SDL2-devel-2.24.0-VC.zip
+- SDL2 windows release files:     https://github.com/libsdl-org/SDL/releases/download/release-2.24.0/SDL2-2.24.0-win32-x86.zip
+- SDL2_ttf development files:     https://github.com/libsdl-org/SDL_ttf/releases/download/release-2.20.1/SDL2_ttf-devel-2.20.1-VC.zip
+- SDL2_ttf windows release files: https://github.com/libsdl-org/SDL_ttf/releases/download/release-2.20.1/SDL2_ttf-2.20.1-win32-x86.zip
 
 The dll-files from the windows release files have to be in your path or the same directory as your executable.
 
 You also need to provide a font file to be used when displaying text, for example:
+
 - https://github.com/opensourcedesign/fonts/blob/master/gnu-freefont_freemono/FreeMonoBold.ttf
+ 
 The .ttf-file has to be in the working directory (which is C-Template Consoloe Application when running CAScope from Visual Studio)
 
 ### OpenCL Support
