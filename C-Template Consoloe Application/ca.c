@@ -1006,6 +1006,14 @@ second lane
 14 18 1c 00		28 29 2a 2b		19 1a 1b 00
 15 19 1d 01		2c 2d 2e 2f		1d 1e 1f 04
 
+bwbipt	block width in bits as power of 2		min(3, bwbipt)
+bwby	block width in bytes					(1 << bwbi) / 8 = 1 << (bwbi - 3)
+bcpt	block count as power of 2
+rpbwol	rows per block without overlap
+rpbiol	rows per block including overlap		rpbwol + 2
+
+vba size in bytes must be dividable by nr-of-blocks * width-of-block (in bytes)
+
 */
 
 
