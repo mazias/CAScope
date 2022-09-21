@@ -109,8 +109,8 @@ const CA_RULE CA_RULE_EMPTY = { 0, 0, 0, 0, 0, 0, 0, 0 };
 #define BPBS 4										// bits per block shift - i.e. nr of bit shifts needed to divide by BPB
 typedef struct caBitArray {
 	int lw;											// lane-width in bits
-	int lc;											// lane-count in nr. of lanes
-	int rw;											// row-width / column-count in bits; rw = lw * lc
+	int lc;											// lane-count in nr. of lanes (columns)
+	int rw;											// row-width in bits; rw = lw * lc
 	int rc;											// row-count
 	int oc;											// overflow-row-count - set to 0 for auto-initialization
 	int mmwn;										// memory-window in rows/lines - must be power of two! - (each rw wide; should allow memory accesses to stay within fastest cache
@@ -2144,6 +2144,14 @@ void CA_CNITFN_OMP_VBA_8x32(caBitArray* vba, CA_RULE* cr) {
 	initCABitArray(vba, cr);
 }
 
+void CA_CNITFN_VBA_16x256(caBitArray* vba, CA_RULE* cr) {
+	vba->lc = 1;
+	vba->lw = 256;
+	vba->mmwn = 8;
+	vba->oc = 14;
+	initCABitArray(vba, cr);
+}
+
 void CA_CNITFN_OMP_VBA_8x1x256(caBitArray* vba, CA_RULE* cr) {
 	vba->lc = 2;
 	vba->lw = 512;
@@ -2161,19 +2169,19 @@ int64_t CA_CNFN_OMP_VBA_8x1x256(int64_t pgnc, caBitArray* vba) {
 		int gnc = pgnc;
 		while (gnc-- > 0) {
 			//
-#pragma omp barrier
-			{
-				//				CABitArrayPrepareOR(vba, ln * 512, (ln + 1) * 512);
-				int bbrw = vba->rw / VBBB;			// bit-blocks per row
-				int from = ln * 512 / VBBB;
-				int to = (ln + 1) * 512 / VBBB;
-				for (int c = from; c < to; ++c) {
-					vba->v[(0 + vba->rc) * bbrw + c] = (vba->v[0 * bbrw + c] >> 1) | (vba->v[0 * bbrw + ((c + 1) % bbrw)] << VBPBMM);
-					vba->v[(1 + vba->rc) * bbrw + c] = (vba->v[1 * bbrw + c] >> 1) | (vba->v[1 * bbrw + ((c + 1) % bbrw)] << VBPBMM);
-				}
-				//				printf("SYNC  gnc %d  ln %d\n", gnc, ln);
-			}
-#pragma omp barrier
+//#pragma omp barrier
+			//{
+			//	//				CABitArrayPrepareOR(vba, ln * 512, (ln + 1) * 512);
+			//	int bbrw = vba->rw / VBBB;			// bit-blocks per row
+			//	int from = ln * 512 / VBBB;
+			//	int to = (ln + 1) * 512 / VBBB;
+			//	for (int c = from; c < to; ++c) {
+			//		vba->v[(0 + vba->rc) * bbrw + c] = (vba->v[0 * bbrw + c] >> 1) | (vba->v[0 * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+			//		vba->v[(1 + vba->rc) * bbrw + c] = (vba->v[1 * bbrw + c] >> 1) | (vba->v[1 * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+			//	}
+			//	//				printf("SYNC  gnc %d  ln %d\n", gnc, ln);
+			//}
+//#pragma omp barrier
 			//
 			__m256i* vbac;
 			vbac = (__m256i*)vba->v + ln * 2;
@@ -2203,70 +2211,107 @@ int64_t CA_CNFN_OMP_VBA_8x1x256(int64_t pgnc, caBitArray* vba) {
 	return 0;
 }
 
+#define NMTS 8			// number of threads
 void CA_CNITFN_OMP_TEST(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = 4;
-	vba->lw = 2 * 256;
+	vba->lc = NMTS;
+	vba->lw = 256;
 	vba->mmwn = 4;
 	initCABitArray(vba, cr);
 }
 
+/*
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	while (gnc > 0) {
+		gnc--;
+		CABitArrayPrepareOR(vba, 0, 0);
+		__m256i* vbac = (__m256i*)vba->v;
+		int rc = vba->rc;
+		register __m256i ymm0;
+		for (int ri = 0; ri < rc; ++ri) {
+			ymm0 = _mm256_or_si256(_mm256_load_si256(vbac + ri), _mm256_load_si256(vbac + ri + 2));
+			ymm0 = _mm256_xor_si256(ymm0, _mm256_load_si256(vbac + ri + 1));
+			_mm256_store_si256(vbac + ri, ymm0);
+		}
+	}
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return gnc;
+*/
+
+/*
+
+from, to		in bits, must be multiple of size of ba->v type (currently 32)
+
+__inline
+void
+CABitArrayPrepareOR(caBitArray* ba, int from, int to) {
+	int bbrw = ba->rw / VBBB;			// bit-blocks per row
+	if (to == 0)
+		to = bbrw;
+	else
+		to = to / VBBB;
+	for (int r = 0; r < ba->oc; ++r) {
+		for (int c = from / VBBB; c < to; ++c) {
+			ba->v[(r + ba->rc) * bbrw + c] =
+				(ba->v[r * bbrw + c] >> 1) | (ba->v[r * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+			//			printf("VB OR  bbrw %d  x %d  x+1 %d %d\n", bbrw, c, (c + 1) & (bbrw - 1), ((c + 1) % bbrw));
+		}
+	}
+}*/
+
 int64_t CA_CNFN_OMP_TEST(int64_t pgnc, caBitArray* vba) {
 	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+CABitArrayPrepareOR(vba, 0, 0);
 
-	int ln;
+int rc = vba->rc;			// row-count
+int oc = vba->oc;			// overflow-count
+int bbrw = vba->rw / VBBB;			// bit-blocks per row
 
-#pragma omp parallel for
-	for (ln = 0; ln < vba->lc; ln++)
+	__m256i* vm256i = (__m256i*)vba->v;										// first valid element / array-pointer to bit array
+	omp_set_num_threads(NMTS);
+//printf("num thread 5D\n", );
+
+	__m256i ymm0, ymm1, ymm2;
+
+	#pragma omp parallel default(none) private(ymm0, ymm1, ymm2) shared(bbrw, vba, oc, rc, vm256i, pgnc)
 	{
-		int gnc = pgnc;
-		__m256i* vbacb;
-		vbacb = (__m256i*)vba->v + ln * vba->lc * vba->lw / 256 * vba->rc / vba->lc;
+		int64_t gnc = pgnc;
+		int tdnm = omp_get_thread_num();		// thread-number
+		__m256i* vbac = vm256i + tdnm;
+
+
 		while (gnc > 0) {
 			gnc--;
-			__m256i* vbac = vbacb;
-			for (int ri = 0; ri < vba->rc; ++ri) {
-				__m256i ymm0 = _mm256_load_si256(vbac + 0);
-				__m256i ymm1 = _mm256_load_si256(vbac + 1);
-				///				ymm0 = _mm256_add_epi32(ymm0, _mm256_set1_epi32(1));
-				///				ymm1 = _mm256_add_epi32(ymm1, _mm256_set1_epi32(1));
-				ymm0 = _mm256_or_si256(ymm0, ymm1);
+			//#pragma omp master
+			//{
+			//	CABitArrayPrepareOR(vba, 0, 0);
+			//}
+
+			//#pragma omp barrier
+			//for (int r = 0; r < oc; ++r) {
+			//	for (int c = 256 * tdnm / VBBB; c < 256 * (tdnm + 1) / VBBB; ++c) {
+			//		vba->v[(r + vba->rc) * bbrw + c] =
+			//			(vba->v[r * bbrw + c] >> 1) | (vba->v[r * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+			//	}
+			//}
+			#pragma omp barrier
+
+//#pragma omp parallel
+			for (int ri = 0; ri < rc; ++ri) {
+///printf_s("Thread %d  gnc %lld  %p  %p\n", omp_get_thread_num(), gnc, vbac + (ri + 0) * NMTS, vbac + (ri + 1) * NMTS);
+//printf_s("Thread %d  bb %d  gnc %lld\n", omp_get_thread_num(), tdnm + ri * NMTS, gnc);
+				ymm0 = _mm256_load_si256(vbac + NMTS * (ri + 0));
+				ymm1 = _mm256_load_si256(vbac + NMTS * (ri + 1));
+				ymm2 = _mm256_load_si256(vbac + NMTS * (ri + 2));
+				ymm0 = _mm256_or_si256(ymm0, ymm2);
 				ymm0 = _mm256_xor_si256(ymm0, ymm1);
-				ymm1 = _mm256_or_si256(ymm1, ymm0);
-				ymm1 = _mm256_xor_si256(ymm1, ymm0);
-				_mm256_store_si256(vbac + 0, ymm0);
-				_mm256_store_si256(vbac + 1, ymm1);
-				//
-				vbac += 2;
+				_mm256_store_si256(vbac + ri * NMTS, ymm0);
 			}
 		}
-		//int gnc = pgnc;
-		//while (gnc > 0) {
-		//	gnc--;
-		//	__m256i* vbac;
-		//	vbac = (__m256i*)vba->v + ln * 2;
-		//	for (int ri = 0; ri < vba->rc; ++ri) {
-		//		__m256i ymm0 = _mm256_load_si256(vbac + 0);
-		//		__m256i ymm1 = _mm256_load_si256(vbac + 1);
-		//		ymm0 = _mm256_add_epi32(ymm0, _mm256_set1_epi32(1));
-		//		ymm1 = _mm256_add_epi32(ymm1, _mm256_set1_epi32(1));
-		//		_mm256_store_si256(vbac + 0, ymm0);
-		//		_mm256_store_si256(vbac + 1, ymm1);
-		//		//
-		//		vbac += 8;
-		//	}
-		//}
 	}
 
 	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	
 	return 0;
-}
-
-void CA_CNITFN_VBA_16x256(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = 1;
-	vba->lw = 256;
-	vba->mmwn = 8;
-	vba->oc = 14;
-	initCABitArray(vba, cr);
 }
 
 int64_t CA_CNFN_VBA_16x256(int64_t pgnc, caBitArray* vba) {
@@ -2407,27 +2452,6 @@ void CA_CNITFN_VBA_1x256(caBitArray* vba, CA_RULE* cr) {
 	initCABitArray(vba, cr);
 }
 
-int64_t CA_CNFN_VBA_1x256(int64_t gnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-	while (gnc > 0) {
-		gnc--;
-		CABitArrayPrepareOR(vba, 0, 0);
-		__m256i* vbac = (__m256i*)vba->v;
-		int rc = vba->rc;
-		register __m256i ymm0;
-		for (int ri = 0; ri < rc; ++ri) {
-			ymm0 = _mm256_or_si256(_mm256_load_si256(vbac + ri), _mm256_load_si256(vbac + ri + 2));
-			ymm0 = _mm256_xor_si256(ymm0, _mm256_load_si256(vbac + ri + 1));
-			_mm256_store_si256(vbac + ri, ymm0);
-			// works, but seems to be slower
-			//*((__m256i*)vba->v + ri) = _mm256_or_si256(*((__m256i*)vba->v + ri), *((__m256i*)vba->v + ri + 2));
-			//*((__m256i*)vba->v + ri) = _mm256_xor_si256(*((__m256i*)vba->v + ri), *((__m256i*)vba->v + ri + 1));
-		}
-	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return gnc;
-}
-
 int64_t CA_CNFN_VBA_1x32(int64_t pgnc, caBitArray* vba) {
 	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
 	while (pgnc > 0) {
@@ -2520,6 +2544,27 @@ int64_t CA_CNFN_VBA_1x64(int64_t pgnc, caBitArray* vba) {
 	return 0;
 }
 
+int64_t CA_CNFN_VBA_1x256(int64_t gnc, caBitArray* vba) {
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	while (gnc > 0) {
+		gnc--;
+		CABitArrayPrepareOR(vba, 0, 0);
+		__m256i* vbac = (__m256i*)vba->v;
+		int rc = vba->rc;
+		register __m256i ymm0;
+		for (int ri = 0; ri < rc; ++ri) {
+			ymm0 = _mm256_or_si256(_mm256_load_si256(vbac + ri), _mm256_load_si256(vbac + ri + 2));
+			ymm0 = _mm256_xor_si256(ymm0, _mm256_load_si256(vbac + ri + 1));
+			_mm256_store_si256(vbac + ri, ymm0);
+			// works, but seems to be slower
+			//*((__m256i*)vba->v + ri) = _mm256_or_si256(*((__m256i*)vba->v + ri), *((__m256i*)vba->v + ri + 2));
+			//*((__m256i*)vba->v + ri) = _mm256_xor_si256(*((__m256i*)vba->v + ri), *((__m256i*)vba->v + ri + 1));
+		}
+	}
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return gnc;
+}
+
 int64_t CA_CNFN_VBA_2x256(int64_t pgnc, caBitArray* vba) {
 	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
 	while (pgnc > 0) {
@@ -2567,6 +2612,7 @@ typedef enum {
 	CM_LUT,												// bit-array			look-up-table
 	CM_HASH,											// bit-array			hash-table
 	CM_VBA_1x256,										// vertical-bit-array	AVX	- 1 lane with 256bits			rule 54 hardcoded
+	CM_OMP_TEST,										// OpenMP Test
 	CM_BOOL,											// bit-array			boolean operators					rule 54 hardcoded
 	CM_VBA_1x32,										// vertical-bit-array	1 lane with 32bit					rule 54 hardcoded
 	CM_VBA_2x32,										// vertical-bit-array	2 lanes with 32bit					rule 54 hardcoded
@@ -2576,7 +2622,6 @@ typedef enum {
 	CM_VBA_16x256,										// vertical-bit-array	AVX - 16 lanes with 256bit			rule 54 hardcoded
 	CM_OMP_VBA_8x32,									// vertical-bit-array	OpenMP - 8 lanes with 32bit			rule 54 hardcoded
 	CM_OMP_VBA_8x1x256,									// vertical-bit-array	AVX & OpenMP - 8 lanes with 256bit	rule 54 hardcoded
-	CM_OMP_TEST,										// OpenMP Test
 	CM_OPENCL,											// OpenCL
 	CM_MAX,
 } caComputationMode;
