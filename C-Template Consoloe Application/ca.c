@@ -1721,9 +1721,20 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 			break;
 		}
 		++cm;
+		// hashtable size warning
+		//if (sc >= 255) {
+		//	printf("WARNING! Hash-table-size low, seek-count at %d\n", sc);
+		//}
+		// hashtable size to big > abort
+		if (sc >= 255 && ll == ((hct[cm].uc & HCLLMK) >> 24)) {
+			printf("ERROR! Hash-table-size insufficient, ABORTING, seek-count at %d\n", sc);
+			//getch();
+			hc_stats[ll].fc++;							// return some other node that has the same level
+			break;
+		}
 		// Hashtable is full!
 		if (sc >= HCISZ) {
-			printf("ERROR! hash table at level %d is full with %d cm %08X  HCISZ %d\n", ll, sc, cm, HCISZ);
+			printf("ERROR! hash table at level %d is full with %d cm %08X  HCISZ %d (press any key)\n", ll, sc, cm, HCISZ);
 			getch();
 			break;
 		}
