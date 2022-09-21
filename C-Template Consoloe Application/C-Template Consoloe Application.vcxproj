@@ -106,8 +106,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>..\..\_INCLUDES\SDL2_ttf-2.0.12 Visual Studio\include;..\..\_INCLUDES\SDL2-2.0.3 Visual Studio\include;$(IncludePath)</IncludePath>
-    <LibraryPath>..\..\_INCLUDES\SDL2_ttf-2.0.12 Visual Studio\lib\x86;..\..\_INCLUDES\SDL2-2.0.3 Visual Studio\lib\x86;$(LibraryPath)</LibraryPath>
+    <IncludePath>..\..\_INCLUDES\SDL2_ttf\include;..\..\_INCLUDES\SDL2\include;$(IncludePath)</IncludePath>
+    <LibraryPath>..\..\_INCLUDES\SDL2_ttf\lib\x86;..\..\_INCLUDES\SDL2\lib\x86;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release - OpenCL Enabled|Win32'">
     <LinkIncremental>false</LinkIncremental>
