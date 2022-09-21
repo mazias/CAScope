@@ -911,10 +911,10 @@ initCABitArray(caBitArray* ba, CA_RULE* rl) {
 	printf("initCABitArray   end    ct %d  rc %d  oc %d  rw %d  lc %d  lw %d  mmwn %d  sz %d  v %p\n", ba->ct, ba->rc, ba->oc, ba->rw, ba->lc, ba->lw, ba->mmwn, ba->sz, ba->v);
 }
 
-/*
+/* 
 csv		cell-space first valid element
 csi		cell-space first invalid element
-ba		bit-array
+ba		(vertical-)bit-array
 dr		direction - 0: csv -> ba; !0 ba -> csv
 */
 void
@@ -922,50 +922,47 @@ convertBetweenCACTandCABitArray(CA_CT* csv, CA_CT* csi, caBitArray* ba, int dr) 
 #define DG 0
 	if (DG) printf("\33[2J\33[0;0fBIT-ARRAY (rc %d  rw %d  ct %d) [\n", ba->rc, ba->rw, ba->ct);
 
+	int dcl = 0;											// vertical-bit-array-destination-column
+	int drw = 0;											// vertical-bit-array-destination-row
+	unsigned int bacsp = ba->rw >> VBPBS;					// vertical-bit-array-cursor-step (in bytes)
+	int l = csi - csv;										// cell-space-length / size in nr. of cells
+	CA_CT* csc = csv;										// cell-space-cursor
 	int cp = 0;												// check-position-counter
-	int dcl = 0;											// destination-column
-	int drw = 0;											// destination-row
-	CA_CT* csc = csv;										// cell-space-cursor / source-pointer
 
 	if (!dr)
-		memset((UINT8*)ba->v, 0, ba->rc * ba->rw / 8);		// ba has to be zero'd before use, as individual bits are 'ored' in
+		memset((UINT8*)ba->v, 0, ba->rc * ba->rw / 8);		// vertical-bit-array has to be zero'd before use, as individual bits are 'ored' in
 
 	goto calculate_next_check_position;
 
 check_position:
 	//if (DG) getch();
-	if (!(drw & (ba->mmwn - 1))) {							// destination-row behind memory-window or last row
+	if (!(drw & (ba->mmwn - 1))) {							// vba-destination-row behind memory-window or last row
 		drw -= ba->mmwn;									// > move destination-row back to beginning of memory-window
 		++dcl;												// > move to next column
 //		printf("drw %d  dcl %d\n", drw, dcl);
-		if (dcl == ba->rw) {								// destination-column behind row-width
+		if (dcl == ba->rw) {								// vba-destination-column behind row-width
 			drw += ba->mmwn;								// > move destination-row to beginning of next memory-window
 			dcl = 0;										// > move destination-column to beginning / zero
-			if (drw >= ba->rc)								// if destination-row is behind last row
+			if (drw >= ba->rc)								// if vba-destination-row is behind last row
 				goto end_loop;								// > conversion is finished
 		}
 	}
 calculate_next_check_position:;								// calculate position in (horizontal-)source-byte-array
-	int i = drw + dcl * ba->rc;								// index
-	int l = csi - csv;										// length
-	if (i >= l) {											// avoid using expensive modulo operator
+	int i = drw + dcl * ba->rc;								// cell-space-index of next cell to convert
+	while (i >= l)											// avoid using expensive modulo operator, i.e. same as i %= l
 		i -= l;
-		if (i >= l)
-			i %= l;
-	}
 	csc = csv + i;
-	cp = min(ba->mmwn, csi - csc);							// next check-position is next memory-window or earlier when size of source array is not big enough
+	cp = min(ba->mmwn, csi - csc);							// next check-position is next memory-window or earlier when the nr. of remaining cells after cursor in source array is smaller than size of memory window
 convert_next_bit:;
-	VBBT* bac = ba->v + ((drw * ba->rw + dcl) >> VBPBS);	// bit-array-cursor
-	unsigned int bacsp = ba->rw >> VBPBS;					// bit-array-cursor-step (in bytes)
-	unsigned int bacst = dcl & VBPBMM;						// bit-array-cursor-shift (in bits)
+	VBBT* bac = ba->v + ((drw * ba->rw + dcl) >> VBPBS);	// vertical-bit-array-cursor
+	unsigned int bacst = dcl & VBPBMM;						// vertical-bit-array-cursor-shift (in bits)
 convert_next_bit_inner:
 	///		if (DG) printf("\33[%d;%df%.3x %c ", drw + 2, 8 + dcl * 6, csc - csv, *csc ? '#' : '.');
 	if (DG) printf("\tcsc %d  bar %d  bac %d   bax #%x  %c\n", csc - csv, drw, dcl, bac - ba->v, *csc ? '#' : '.');
 	if (dr)
-		*csc = 1 & ((*bac) >> bacst);						// convert ba -> csv
+		*csc = 1 & ((*bac) >> bacst);						// convert vba -> csv
 	else
-		*bac |= ((VBBT)*csc) << bacst;						// convert csv -> ba 
+		*bac |= ((VBBT)*csc) << bacst;						// convert csv -> vba 
 	//
 	++drw;
 	++csc;
@@ -978,6 +975,41 @@ end_loop:
 
 	if (DG) printf("]\n");
 }
+
+/*
+Plan for vertical-bit-array memory layout that is suitable for parallel usage
+> seperate memory blocks of each parallel process to avoid false sharing.
+1 lane is handles by 1 parallel process
+
+cell-space-size: 1f elements
+vba: 2 lanes, each 4 cells wide
+
+source adr.		dest. adr.		vba
+-cell-space		-vba			overlap
+-in bytes		-in bits		source
+
+first lane
+00 04 08 0c		00 01 02 03
+01 05 09 0d		04 05 06 07
+02 06 0a 0e		08 09 0a 0b
+03 07 0b 0f		0c 0d 0e 0f
+--overlap--		--overlap--
+04 08 0c 10		10 11 12 13		01 02 03 18
+05 09 0d 11		14 15 16 17		05 06 07 1c
+
+second lane
+10 14 18 1c		18 19 1a 1b
+11 15 19 1d		1c 1d 1e 1f
+12 16 1a 1e		20 21 22 23
+13 17 1b 1f		24 25 26 27
+--overlap--		--overlap--
+14 18 1c 00		28 29 2a 2b		19 1a 1b 00
+15 19 1d 01		2c 2d 2e 2f		1d 1e 1f 04
+
+*/
+
+
+
 /*
 csv		cell-space first valid element
 bav		bit-array first valid element
