@@ -98,28 +98,27 @@ CA_RULE {
 const CA_RULE CA_RULE_EMPTY = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
 /* Bit-array */
-#define VBBT UINT32									// vertical-bit-block-type
-#define VBBB 32										// vertical-bits-per-bit-block-type
-#define VBPBS 5										// vertical bits per block shift - i.e. nr of bit shifts needed to divide by VBBB
-#define VBPBMM (VBBB - 1)							// vertical-bits-per-block-mod-mask - X & (BPB - 1) is equivalent to X % BPB when BPB is power of 2 
+#define VBBT UINT32									// vertical-bit-block-type - datatype used to do operations (esp. bit manipulation) on vertical-bit-array
+#define VBBTBTCTPT 5								// vertical-bit-block-type-bit-count as power of 2
+#define VBBTBTCTMM ((1 << VBBTBTCTPT) - 1)			// vertical-bit-block-type-bit-count-mod-mask - is equivalent to X % vertical-bit-block-type-bit-count (must be power of 2)
 #define FBPT UINT16									// full-bit-block c-data-type
 #define HBPT UINT8									// half-bit-block c-data-type
 #define BPB 16										// bits per block, i.e. bits per elemet in bta 
 #define BPBMM (BPB - 1)								// bits-per-block-mod-mask - X & (BPB - 1) is equivalent to X % BPB when BPB is power of 2 
 #define BPBS 4										// bits per block shift - i.e. nr of bit shifts needed to divide by BPB
 typedef struct caBitArray {
-	int lw;											// lane-width in bits
-	int lc;											// lane-count in nr. of lanes (columns)
-	int rw;											// row-width in bits; rw = lw * lc
-	int rc;											// row-count
-	int oc;											// overflow-row-count - set to 0 for auto-initialization
-	int mmwn;										// memory-window in rows/lines - must be power of two! - (each rw wide; should allow memory accesses to stay within fastest cache
-	int ct;											// count in bits
-	int sz;											// size in bytes
-	VBBT* v;										// first valid element / array-pointer to bit array
-	CA_CT* clsc;									// cell-space - original cell-space-array
-	int scsz;										// original space-size
-	int brsz;										// original border-size
+	VBBT* v;										// vertical-bit-array (vba) - first valid element / array-pointer to bit array
+	int lc;											// vba-lane-count in nr. of lanes (columns)
+	int lw;											// vba-lane-width in bits
+	int rw;											// vba-row-width in bits; rw = lw * lc
+	int rc;											// vba-row-count
+	int oc;											// vba-overflow-row-count - set to 0 for auto-initialization
+	int mmwn;										// vba-memory-window in rows/lines - must be power of two! - (each rw wide; should allow memory accesses to stay within fastest cache
+	int ct;											// vba-count in bits - must be initialized to be at least scsz
+	int sz;											// vba-size in bytes
+	CA_CT* clsc;									// cell-space
+	int scsz;										// cell-space-size in nr of cells
+	int brsz;										// cell-space-border-size in nr of cells
 	CA_RULE* cr;									// ca-rule configuration 	
 } caBitArray;
 
@@ -174,14 +173,12 @@ int32_t log2fix(uint32_t x, size_t precision)
 	return y;
 }
 
-// fnv hash: http://www.isthe.com/chongo/tech/comp/fnv/index.html 
-
+// fnv hash functions: http://www.isthe.com/chongo/tech/comp/fnv/index.html 
 /*
  * 32 bit magic FNV-0 and FNV-1 prime
  */
 #define FNV_32_PRIME ((Fnv32_t)0x01000193)
 #define FNV1_32_INIT ((UINT32)2166136261)
-
 
  /*
   * fnv_32_buf - perform a 32 bit Fowler/Noll/Vo hash on a buffer
@@ -235,9 +232,6 @@ fnv_16_buf(void* buf, size_t len)
 	hash = (hash >> 16) ^ (hash & MASK_16);
 	return (UINT16)hash;
 }
-
-
-
 
 // returns 0-terminated string of content of filename
 char* read_file(const char* filename) {
@@ -314,9 +308,13 @@ CA_LoadFromFile(const char* filename, int* ct) {
 		fseek(stream, 0L, SEEK_SET);
 		if (ct)
 			*ct = nwsz;
+		if (!nwsz)
+			return NULL;
 		// alloc memory
 		CA_CT* nwsc = NULL;									// new space
 		nwsc = malloc(nwsz * sizeof * nwsc);
+		if (!nwsc)
+			return NULL;
 		// read data and close
 		fread(nwsc, sizeof(CA_CT), nwsz / sizeof(CA_CT), stream);
 		fclose(stream);
@@ -367,522 +365,21 @@ void print_bits(unsigned char* bytes, size_t num_bytes, int bypr) {
 	printf("]\n");
 }
 
-#if ENABLE_CL 
-	// **********************************************************************************************************************************
-	// OpenCL
-	// *********************************************************************************************************************************
-	// OCL Declarations *****************************************************************************************************************
-	// **********************************************************************************************************************************
-	#define OCL_CHECK_ERROR(error) { \
-		if ((error) != CL_SUCCESS) fprintf (stderr, "OpenCL error <%s:%i>: %s\n", __FILE__, __LINE__, ocl_strerr((error))); }
-
-	static const char* opencl_error_msgs[] = {
-		"CL_SUCCESS",
-		"CL_DEVICE_NOT_FOUND",
-		"CL_DEVICE_NOT_AVAILABLE",
-		"CL_COMPILER_NOT_AVAILABLE",
-		"CL_MEM_OBJECT_ALLOCATION_FAILURE",
-		"CL_OUT_OF_RESOURCES",
-		"CL_OUT_OF_HOST_MEMORY",
-		"CL_PROFILING_INFO_NOT_AVAILABLE",
-		"CL_MEM_COPY_OVERLAP",
-		"CL_IMAGE_FORMAT_MISMATCH",
-		"CL_IMAGE_FORMAT_NOT_SUPPORTED",
-		"CL_BUILD_PROGRAM_FAILURE",
-		"CL_MAP_FAILURE",
-		"CL_MISALIGNED_SUB_BUFFER_OFFSET",
-		"CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST",
-		/* next IDs start at 30! */
-		"CL_INVALID_VALUE",
-		"CL_INVALID_DEVICE_TYPE",
-		"CL_INVALID_PLATFORM",
-		"CL_INVALID_DEVICE",
-		"CL_INVALID_CONTEXT",
-		"CL_INVALID_QUEUE_PROPERTIES",
-		"CL_INVALID_COMMAND_QUEUE",
-		"CL_INVALID_HOST_PTR",
-		"CL_INVALID_MEM_OBJECT",
-		"CL_INVALID_IMAGE_FORMAT_DESCRIPTOR",
-		"CL_INVALID_IMAGE_SIZE",
-		"CL_INVALID_SAMPLER",
-		"CL_INVALID_BINARY",
-		"CL_INVALID_BUILD_OPTIONS",
-		"CL_INVALID_PROGRAM",
-		"CL_INVALID_PROGRAM_EXECUTABLE",
-		"CL_INVALID_KERNEL_NAME",
-		"CL_INVALID_KERNEL_DEFINITION",
-		"CL_INVALID_KERNEL",
-		"CL_INVALID_ARG_INDEX",
-		"CL_INVALID_ARG_VALUE",
-		"CL_INVALID_ARG_SIZE",
-		"CL_INVALID_KERNEL_ARGS",
-		"CL_INVALID_WORK_DIMENSION",
-		"CL_INVALID_WORK_GROUP_SIZE",
-		"CL_INVALID_WORK_ITEM_SIZE",
-		"CL_INVALID_GLOBAL_OFFSET",
-		"CL_INVALID_EVENT_WAIT_LIST",
-		"CL_INVALID_EVENT",
-		"CL_INVALID_OPERATION",
-		"CL_INVALID_GL_OBJECT",
-		"CL_INVALID_BUFFER_SIZE",
-		"CL_INVALID_MIP_LEVEL",
-		"CL_INVALID_GLOBAL_WORK_SIZE"
-	};
-	const char*
-	ocl_strerr(int error)
-	{
-		int index = 0;
-
-		if (error >= -14)
-			index = -error;
-		else if (error <= -30 && error >= -64)
-			index = -error - 15;
-
-		return opencl_error_msgs[index];
-	}
-
-
-	typedef struct OCLCA {
-		cl_int				success;
-		cl_context			context;
-		cl_command_queue	command_queue;
-		cl_kernel			kernel_ca_next_gen;
-		cl_kernel			kernel_ca_next_gen_tot_ncn3;
-		cl_kernel			kernel_ca_next_gen_abs_ncn3_ncs2;
-		cl_kernel			kernel_ca_next_gen_range_tot_ncn3;
-		cl_kernel			kernel_ca_next_gen_vba;
-	} OCLCA;
-	// **********************************************************************************************************************************
-	// OCL Functions ********************************************************************************************************************
-	// **********************************************************************************************************************************
-	// returns valid opencl kernel object
-	#define CL_MAX_PLATFORM_COUNT (4)
-	#define CL_MAX_DEVICE_COUNT (4)
-	OCLCA
-	OCLCA_Init(
-		const char* cl_filename
-	) {
-		OCLCA result;
-		result.command_queue = NULL;
-		result.context = NULL;
-		result.kernel_ca_next_gen = NULL;
-		result.kernel_ca_next_gen_tot_ncn3 = NULL;
-		result.kernel_ca_next_gen_abs_ncn3_ncs2 = NULL;
-		result.kernel_ca_next_gen_range_tot_ncn3 = NULL;
-		result.success = CL_SUCCESS;
-
-		//return result;
-
-			////////// BEGIN SETUP GPU COMMUNICATION
-
-
-			// Find the first GPU device
-		cl_int cl_errcode_ret;				// used to retrieve opencl error codes
-		cl_device_id selected_device = 0;
-
-		cl_uint platform_count = 0;
-		clGetPlatformIDs(0, NULL, &platform_count);
-		cl_platform_id platform_ids[CL_MAX_PLATFORM_COUNT];
-		clGetPlatformIDs(CL_MAX_PLATFORM_COUNT, platform_ids, &platform_count);
-
-		/* Macros to help display device infos */
-	#define OCL_PRINT_DEVICE_INFO_STRING(cl_device_info) { \
-		OCL_CHECK_ERROR(clGetDeviceInfo(device, cl_device_info, sizeof(string1024), &string1024, NULL)); \
-		printf("clGetDeviceInfo %-40s %s\n", #cl_device_info, string1024); }
-	#define OCL_PRINT_DEVICE_INFO_UINT(cl_device_info) { \
-		OCL_CHECK_ERROR(clGetDeviceInfo(device, cl_device_info, sizeof(rt_cl_uint), &rt_cl_uint, NULL)); \
-		printf("clGetDeviceInfo %-40s %u\n", #cl_device_info, rt_cl_uint); }
-		/* */
-		char string1024[1024];
-		cl_uint rt_cl_uint;
-		for (int pi = 0; pi < platform_count; pi++) {
-			cl_platform_id platform_id = platform_ids[pi];
-
-			cl_uint device_count = 0;
-			clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, 0, NULL, &device_count);
-			cl_device_id device_ids[CL_MAX_DEVICE_COUNT];
-			clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, CL_MAX_DEVICE_COUNT, device_ids, &device_count);
-
-			fprintf(stderr, "SUC platform found  platform count %d  platform #%d  device count %d  device id #0 %d%d\n",
-				platform_count, pi, device_count, device_ids[0]);
-
-			for (int i = 0; i < device_count; i++) {
-				cl_device_id device = device_ids[i];
-				OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_NAME)
-					OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_VENDOR)
-					OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_VERSION)
-					OCL_PRINT_DEVICE_INFO_STRING(CL_DRIVER_VERSION)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_ADDRESS_BITS)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_MAX_CLOCK_FREQUENCY)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_MAX_COMPUTE_UNITS)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_LONG)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_FLOAT)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_CHAR)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_SHORT)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_INT)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_LONG)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_FLOAT)
-					OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_DOUBLE)
-					//OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_EXTENSIONS)
-
-					if (pi == 0) {
-						selected_device = device;
-						printf("SELECTED\n");
-					}
-			}
-		}
-
-		if (!selected_device) {
-			fprintf(stderr, "ERR failed to find any OpenCL GPU device. Sorry.\n");
-			result.success = selected_device;
-			return result;
-		}
-
-		// clCreateContext
-		cl_context context = clCreateContext(NULL, 1, &selected_device, NULL, NULL, &cl_errcode_ret);
-		OCL_CHECK_ERROR(cl_errcode_ret);
-		// clCreateCommandQueue
-		cl_command_queue command_queue = clCreateCommandQueue(context, selected_device, 0, &cl_errcode_ret);
-		if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clCreateCommandQueue @0x%x\n", command_queue);
-		else									printf("ERR clCreateCommandQueue failed with error code %d\n", cl_errcode_ret);
-		// clCreateProgramWithSource
-		const char* program_code = read_file(cl_filename);
-		cl_program program = clCreateProgramWithSource(context, 1, (const char* []) { program_code }, NULL, & cl_errcode_ret);
-		if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clCreateProgramWithSource @0x%x\n", program);
-		else									printf("ERR clCreateProgramWithSource failed with error code %d\n", cl_errcode_ret);
-		// clBuildProgram
-		cl_errcode_ret = clBuildProgram(program, 0, NULL, "", NULL, NULL);
-		if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clBuildProgram\n");
-		if (cl_errcode_ret != CL_SUCCESS) {
-			printf("ERR clBuildProgram failed with error code %d\n", cl_errcode_ret);
-			char compiler_log[4096] = "EMPTY\0";
-			clGetProgramBuildInfo(program, selected_device, CL_PROGRAM_BUILD_LOG, sizeof(compiler_log), compiler_log, NULL);
-			printf("    error log\n%s\n", compiler_log);
-			result.success = cl_errcode_ret;
-			return result;
-		}
-		// clCreateKernel
-		////result.kernel_ca_next_gen = clCreateKernel(program, "ca_next_gen", &cl_errcode_ret);
-		////OCL_CHECK_ERROR(cl_errcode_ret)
-		////result.kernel_ca_next_gen_tot_ncn3 = clCreateKernel(program, "ca_next_gen_tot_ncn3", &cl_errcode_ret);
-		////OCL_CHECK_ERROR(cl_errcode_ret)
-		////result.kernel_ca_next_gen_abs_ncn3_ncs2 = clCreateKernel(program, "ca_next_gen_abs_ncn3_ncs2", &cl_errcode_ret);
-		////OCL_CHECK_ERROR(cl_errcode_ret)	
-		////result.kernel_ca_next_gen_range_tot_ncn3 = clCreateKernel(program, "ca_next_gen_range_tot_ncn3", &cl_errcode_ret);
-		////OCL_CHECK_ERROR(cl_errcode_ret)
-		result.kernel_ca_next_gen_vba = clCreateKernel(program, "ca_next_gen_vba", &cl_errcode_ret);
-		OCL_CHECK_ERROR(cl_errcode_ret)
-			// get some kernel info
-		{
-			cl_kernel kernel = result.kernel_ca_next_gen_vba;
-			size_t kwgs = 0;
-			OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_WORK_GROUP_SIZE, sizeof(kwgs), &kwgs, NULL));
-			printf("CL_KERNEL_WORK_GROUP_SIZE %u\n", kwgs);
-			size_t pwgsm = 0;
-			OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE, sizeof(pwgsm), &pwgsm, NULL));
-			printf("CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE %u\n", pwgsm);
-			cl_ulong pms = 0;
-			OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_PRIVATE_MEM_SIZE, sizeof(pms), &pms, NULL));
-			printf("CL_KERNEL_PRIVATE_MEM_SIZE %u\n", pms);
-			cl_ulong lms = 0;
-			OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_LOCAL_MEM_SIZE, sizeof(lms), &lms, NULL));
-			printf("CL_KERNEL_LOCAL_MEM_SIZE %u\n", pms);
-		}
-		//
-		result.context = context;
-		result.command_queue = command_queue;
-
-		// cleanup
-		//clReleaseProgram(program);
-		//clReleaseCommandQueue(command_queue);
-		//clReleaseContext(context);
-
-		return result;
-	}
-	//**********************************************************************************************************************************
-	/* Calculate next generation OpenCL   flexible variant - can handle totalistic and absolute rules by use of multiplication table */
-	void OCLCA_Run(
-		int ng,					// nr of generations
-		int res,				// reset flag, is 1 if anything changes
-		OCLCA oclca,
-		CA_RULE* cr,
-		int sync_memory,
-		const CA_CT* clv,		// cell-line first valid element - this array must include brd > size must ne spsz + brd
-		const int scsz,			// space-size
-		const int brsz,			// border-size
-		cl_uint rg)		// range per kernel
-	{
-		rg = max(1, rg);
-
-		cl_int cl_errcode_ret;	// used to retrieve opencl error codes
-
-		// define how many kernels run in parallel
-		cl_uint work_dim = 1;
-		cl_uint gws[1];		// global work size
-		cl_uint lws[1];		// local work size
-
-		///printf("clv %x  scsz %d  gws[0] %u  klrg %u\n", clv, scsz, gws[0], rg);
-
-		// create host to device memory bindings and transfer memory from host to device
-		static cl_mem b_cli = NULL;			// opencl binding for cell-line
-		static cl_mem b_clo = NULL;			// opencl binding for cell-line
-		static cl_mem b_clsz = NULL;			// opencl binding for cell-line-size
-		static cl_mem b_ncn = NULL;			// opencl binding for ncn
-		static cl_mem b_rltl = NULL;			// opencl binding for 
-		static cl_mem b_mntl = NULL;			// opencl binding for
-		static cl_mem b_rg = NULL;			// opencl binding for
-		static int clfp = 0;			// cell-line flip to switch between cli and clo
-		/* Init device memory and host-device-memory-bindings and kernel arguments */
-		if (1 || sync_memory || res || b_cli == NULL) {
-			//printf("opencl_ca memory reset\n");
-			sync_memory = 1;
-			clfp = 1;
-			// clean up
-			if (b_cli != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_cli));
-			if (b_clo != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_clo));
-			if (b_ncn != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_ncn));
-			if (b_rltl != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_rltl));
-			if (b_mntl != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_mntl));
-			if (b_rg != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_rg));
-			// cli
-			b_cli = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, (scsz + brsz) * sizeof(*clv), clv, &cl_errcode_ret);
-			OCL_CHECK_ERROR(cl_errcode_ret);
-			// clo
-			b_clo = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE, (scsz + brsz) * sizeof(*clv), NULL, &cl_errcode_ret);
-			OCL_CHECK_ERROR(cl_errcode_ret);
-			// ncn
-			b_ncn = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->ncn), &cr->ncn, &cl_errcode_ret);
-			OCL_CHECK_ERROR(cl_errcode_ret);
-			// rule-table
-			b_rltl = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->rltl[0]) * cr->nns, &cr->rltl[0], &cl_errcode_ret);
-			OCL_CHECK_ERROR(cl_errcode_ret);
-			// multiplication-table
-			b_mntl = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->mntl[0]) * cr->ncn, &cr->mntl[0], &cl_errcode_ret);
-			OCL_CHECK_ERROR(cl_errcode_ret);
-			// rg
-			b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
-			OCL_CHECK_ERROR(cl_errcode_ret);
-		}
-
-		/* Run kernel */
-		if (0 && cr->tp == TOT && cr->ncn == 3) {
-			int LT = 1;
-			ng = (ng + 1) / LT;
-
-			if (1) {
-				int ws = scsz;// +2 * ng;			// work-size - nr of cells to process
-				int wi = 64;						// item-size in cells
-				int wg = 128;						// group-size in items
-
-				lws[0] = 128;
-				gws[0] = ws / wi / wg * wg;
-				while (gws[0] * wi < ws)
-					gws[0] += wg;
-
-				rg = 0;
-				//ng = 1;
-				clReleaseMemObject(b_rg);
-				b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
-				if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clCreateBuffer failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
-
-				printf("ng %d  ws %d  wi %d  wg %d  gws[0] %d gws[0]*wi %d  max ws %d\n", ng, ws, wi, wg, gws[0], gws[0] * wi, scsz + brsz);
-			}
-			else {
-				int ws = scsz + 2 * ng;			// work-size - nr of cells to process
-				int gs = 128;					// group-size in items
-				int gc = 1;						// group-count
-
-				int gn = gs - 2 * LT;			// group-netto - netto amount of items fully processed after acessing gs items
-
-				int gr;							// group-range per group - nr of items one group processes
-
-				// count fixed, range free
-				gr = ws / gc / gs;					// work is distributed among gc groups
-				gr = gr / gn;					// each group processes gs items in parallel
-				while (gr * gn * gc * gs < ws)		// make sure at least ndss items are processed
-					++gr;
-
-				// range fixed, count free
-				//gr = 1;
-				//gc = ws / gn;
-				//while (gr * gn * gc < ws)		// make sure at least ndss items are processed
-				//	++gc;
-
-
-				static int dc = 0;
-				if (1 | ++dc == 100) {
-					dc = 0;
-					printf("ng %d  ws %d  gc %d  gs %d  gn %d  gr %d  gr*gn*gc %d  max ws %d\n", ng, ws, gc, gs, gn, gr, gr * gn * gc, scsz + brsz);
-				}
-				if (gr * gn * gc * 16 > scsz + brsz) {
-					printf("!!!! working size to big / border to small\n");
-					gr = 0;
-				}
-
-				rg = gr;
-				clReleaseMemObject(b_rg);
-				b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
-				if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clCreateBuffer failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
-
-				// kernel ca_next_gen_tot_ncn3
-				///lws[0] = 128;
-				lws[0] = gs;
-				//gws[0] = (scsz + brsz - cr->ncn + 1 - 512 /* LT */) / rg;
-				///gws[0] = ((scsz + brsz - cr->ncn + 1) / rg + 1) / 128 * 128;
-				//gws[0] = scsz / rg + 1;
-				gws[0] = gc * gs;
-			}
-			///printf("gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
-			// set constant kernel arguments
-			cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, 2, sizeof(b_rltl), &b_rltl);
-			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
-			cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, 3, sizeof(b_rg), &b_rg);
-			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
-			// run kernel rt times
-			for (int rt = 0; rt < ng; ++rt) {
-				// advance clfp
-				if (++clfp == 2) clfp = 0;
-				///printf("clfp %d\n", clfp);
-				// set variable kernel arguments
-				cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, clfp == 1, sizeof(b_cli), &b_cli);
-				if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg failed with error code  %d.\n", cl_errcode_ret);
-				cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, clfp == 0, sizeof(b_clo), &b_clo);
-				if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg failed with error code  %d.\n", cl_errcode_ret);
-				// run kernel
-				cl_errcode_ret = clEnqueueNDRangeKernel(oclca.command_queue, oclca.kernel_ca_next_gen_range_tot_ncn3, work_dim, NULL, &gws, &lws, 0, NULL, NULL);
-				if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clEnqueueNDRangeKernel for kenrel 'ca_next_gen_tot_ncn3' failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
-				//else									printf("SUC clEnqueueNDRangeKernel for kenrel 'ca_next_gen_tot_ncn3' near line %d.\n", __LINE__);
-			}
-		}
-		// SIMPLE KERNEL
-		else {
-			/* Make sure kernrel is available */
-			//if (oclca.kernel_ca_next_gen == NULL || oclca.kernel_ca_next_gen_tot_ncn3 == NULL)
-			//	return 0;
-
-			cl_kernel kernel = oclca.kernel_ca_next_gen_tot_ncn3;
-			if (cr->ncn == 3 && cr->ncs == 2)
-				kernel = oclca.kernel_ca_next_gen_abs_ncn3_ncs2;
-			int mnsz = (scsz + ng * (cr->ncn - 1));	// minimum size needed to process
-			int mxsz = scsz + brsz;	// maximum size
-			lws[0] = 1024;
-			gws[0] = mnsz / lws[0] * lws[0];
-			while (gws[0] < mnsz)
-				gws[0] += lws[0];
-			//		printf("smpl krnl  ng %6d  gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", ng, gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
-
-			if (gws[0] > mxsz) {
-				printf("space size insufficient! aborting.\n");
-				printf("smpl krnl  ng %6d  gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", ng, gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
-				return;
-			}
-
-			//
-			// set constant kernel arguments
-			///OCL_CHECK_ERROR(clSetKernelArg(kernel, 2, sizeof(b_ncn), &b_ncn));
-			OCL_CHECK_ERROR(clSetKernelArg(kernel, 2, sizeof(b_rltl), &b_rltl));
-			///OCL_CHECK_ERROR(clSetKernelArg(kernel, 4, sizeof(b_mntl), &b_mntl));
-			// run kernel rt times
-			for (int rt = 0; rt < ng; ++rt) {
-				// advance clfp
-				if (++clfp == 2) clfp = 0;
-				// set variable kernel arguments
-				OCL_CHECK_ERROR(clSetKernelArg(kernel, clfp == 1, sizeof(b_cli), &b_cli));
-				OCL_CHECK_ERROR(clSetKernelArg(kernel, clfp == 0, sizeof(b_clo), &b_clo));
-				// run kernel
-				OCL_CHECK_ERROR(clEnqueueNDRangeKernel(oclca.command_queue, kernel, work_dim, NULL, &gws, &lws, 0, NULL, NULL));
-			}
-		}
-		/* Transfer device memory to host memory */
-		if (sync_memory) {
-			//if (1) {// && sync_memory && b_clo != NULL) {
-			cl_mem b_cl;
-			if (clfp == 0)	b_cl = b_clo;
-			else			b_cl = b_cli;
-			OCL_CHECK_ERROR(clEnqueueReadBuffer(oclca.command_queue, b_cl, CL_TRUE, 0, scsz * sizeof(*clv), clv, NULL, 0, NULL));
-
-			//clEnqueueMapBuffer(oclca.command_queue, b_cl, CL_TRUE, CL_MAP_READ, 0, (scsz + brsz) * sizeof(*clv), 0, NULL, NULL, &cl_errcode_ret);
-			//if (cl_errcode_ret != CL_SUCCESS)			printf("ERR clEnqueueMapBuffer failed with error code %d\n", cl_errcode_ret);
-			////	///memcpy(DeMa, result, DMS * sizeof(*DeMa));
-			//clEnqueueUnmapMemObject(oclca.command_queue, b_cl, 0, 0, NULL, NULL);
-		}
-	}
-
-
-	// **********************************************************************************************************************************
-	/* Calculate next generation OpenCL   flexible variant - can handle totalistic and absolute rules by use of multiplication table */
-	void OCLCA_RunVBA(
-		int gnc,										// nr of generations
-		int res,									// reset flag, is 1 if anything changes
-		OCLCA oclca,
-		CA_RULE* cr,
-		caBitArray vba,
-		int sync_memory,
-		cl_uint rg)									// range per kernel
-	{
-		rg = max(1, rg);
-
-		cl_int cl_errcode_ret;						// used to retrieve opencl error codes
-
-		// create host to device memory bindings and transfer memory from host to device
-		static cl_mem b_vba = NULL;					// opencl binding for vertical-bit-array
-		/* Init device memory and host-device-memory-bindings and kernel arguments */
-		if (1 || sync_memory || res || b_vba == NULL) {
-			//printf("opencl_ca memory reset\n");
-			sync_memory = 1;
-			// clean up
-			if (b_vba != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_vba));
-			// vba
-			b_vba = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, vba.ct / 8 + vba.oc * vba.rw / 8, vba.v, &cl_errcode_ret);
-			OCL_CHECK_ERROR(cl_errcode_ret);
-		}
-
-		/* Run kernel */
-		// define how many kernels run in parallel
-		size_t global = vba.lc;								// global work size
-	///printf("gws %d  rg %d  rc %d  lc %d\n", gws[0], rg, vba.lc, vba.rc);
-		// set kernel arguments
-		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 0, sizeof(b_vba), &b_vba);
-		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #0 failed with error code  %d.\n", cl_errcode_ret);
-		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 1, sizeof(gnc), &gnc);
-		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
-		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 2, sizeof(vba.rc), &vba.rc);
-		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #1 failed with error code  %d.\n", cl_errcode_ret);
-		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 3, sizeof(vba.lc), &vba.lc);
-		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #3 failed with error code  %d.\n", cl_errcode_ret);
-		// run kernel
-		cl_errcode_ret = clEnqueueNDRangeKernel(oclca.command_queue, oclca.kernel_ca_next_gen_vba, 1, NULL, &global, NULL, 0, NULL, NULL);
-		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clEnqueueNDRangeKernel for kenrel 'ca_next_gen_vba' failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
-		//
-		clFinish(oclca.command_queue);
-		/* Transfer device memory back to host memory */
-		if (sync_memory) {
-			printf("vba.ct %d\n", vba.ct);
-			OCL_CHECK_ERROR(clEnqueueReadBuffer(oclca.command_queue, b_vba, CL_TRUE, 0, vba.ct / 8, vba.v, 0, NULL, NULL));
-		}
-	}
-	// **********************************************************************************************************************************
-#endif
-
 /**
 * from, to		in bits, must be multiple of size of ba->v type (currently 32)
 */
 __inline
 void
 CABitArrayPrepareOR(caBitArray* ba, int from, int to) {
-	int bbrw = ba->rw / VBBB;			// bit-blocks per row
+	int bbrw = ba->rw >> VBBTBTCTPT;			// bit-blocks per row
 	if (to == 0)
 		to = bbrw;
 	else
-		to = to / VBBB;
+		to >>= VBBTBTCTPT;
 	for (int r = 0; r < ba->oc; ++r) {
-		for (int c = from / VBBB; c < to; ++c) {
+		for (int c = from >> VBBTBTCTPT; c < to; ++c) {
 			ba->v[(r + ba->rc) * bbrw + c] =
-				(ba->v[r * bbrw + c] >> 1) | (ba->v[r * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+				(ba->v[r * bbrw + c] >> 1) | (ba->v[r * bbrw + ((c + 1) % bbrw)] << VBBTBTCTMM);
 			//			printf("VB OR  bbrw %d  x %d  x+1 %d %d\n", bbrw, c, (c + 1) & (bbrw - 1), ((c + 1) % bbrw));
 		}
 	}
@@ -924,7 +421,7 @@ convertBetweenCACTandCABitArray(CA_CT* csv, CA_CT* csi, caBitArray* ba, int dr) 
 
 	int dcl = 0;											// vertical-bit-array-destination-column
 	int drw = 0;											// vertical-bit-array-destination-row
-	unsigned int bacsp = ba->rw >> VBPBS;					// vertical-bit-array-cursor-step (in bytes)
+	unsigned int bacsp = ba->rw >> VBBTBTCTPT;					// vertical-bit-array-cursor-step (in bytes)
 	int l = csi - csv;										// cell-space-length / size in nr. of cells
 	CA_CT* csc = csv;										// cell-space-cursor
 	int cp = 0;												// check-position-counter
@@ -954,8 +451,8 @@ calculate_next_check_position:;								// calculate position in (horizontal-)sou
 	csc = csv + i;
 	cp = min(ba->mmwn, csi - csc);							// next check-position is next memory-window or earlier when the nr. of remaining cells after cursor in source array is smaller than size of memory window
 convert_next_bit:;
-	VBBT* bac = ba->v + ((drw * ba->rw + dcl) >> VBPBS);	// vertical-bit-array-cursor
-	unsigned int bacst = dcl & VBPBMM;						// vertical-bit-array-cursor-shift (in bits)
+	VBBT* bac = ba->v + ((drw * ba->rw + dcl) >> VBBTBTCTPT);	// vertical-bit-array-cursor
+	unsigned int bacst = dcl & VBBTBTCTMM;						// vertical-bit-array-cursor-shift (in bits)
 convert_next_bit_inner:
 	///		if (DG) printf("\33[%d;%df%.3x %c ", drw + 2, 8 + dcl * 6, csc - csv, *csc ? '#' : '.');
 	if (DG) printf("\tcsc %d  bar %d  bac %d   bax #%x  %c\n", csc - csv, drw, dcl, bac - ba->v, *csc ? '#' : '.');
@@ -972,7 +469,6 @@ convert_next_bit_inner:
 	bac += bacsp;
 	goto convert_next_bit_inner;
 end_loop:
-
 	if (DG) printf("]\n");
 }
 
@@ -1005,18 +501,30 @@ second lane
 --overlap--		--overlap--
 14 18 1c 00		28 29 2a 2b		19 1a 1b 00
 15 19 1d 01		2c 2d 2e 2f		1d 1e 1f 04
-
-bwbipt	block width in bits as power of 2		min(3, bwbipt)
-bwby	block width in bytes					(1 << bwbi) / 8 = 1 << (bwbi - 3)
-bcpt	block count as power of 2
-rpbwol	rows per block without overlap
-rpbiol	rows per block including overlap		rpbwol + 2
-
-vba size in bytes must be dividable by nr-of-blocks * width-of-block (in bytes)
-
 */
 
+vbatst(CA_CT* csv, CA_CT* csi, caBitArray* ba, int dr) {
+	unsigned int bcpt = 2;										// block-count as power of two
+	unsigned int rwwpt	= min(8, VBBTBTCTPT);					// row-width in bits/cells as power of 2
+	//unsigned int rwsz	= 1 << (rwwpt - 3);						// row-size in bytes
+	unsigned int rpbwol;										// rows per block without overlap
+	rpbwol = (ba->scsz + (1 << (bcpt + rwwpt)) - 1) / (1 << (bcpt + rwwpt));		// i.e.: scsz / (block-count * row-width) rounded up to multiple of (block-count * row-width)
+	unsigned int rpbiol = rpbwol + ba->oc;						// rows per block including overlap
+	//unsigned int bksz = rpbiol << (rwwpt - 3);				// block-size in bytes
+	unsigned int vbasz = rpbiol << (bcpt + rwwpt - 3);			// vertical-bit-array-size in bytes
 
+	// convert cell-space-position to vba-position
+	CA_CT* csc = csv;										// cell-space-cursor
+	int csi = 0;	// cell-space-index
+	int vbai = 0;	// vba-index (in bits)
+
+	// convert vba-position to cell-space-position
+	unsigned int bi;			// block-iterator
+	for (bi = 0; bi < 1 << bcpt; bi++) {
+
+	}
+
+}
 
 /*
 csv		cell-space first valid element
@@ -1072,256 +580,6 @@ loop:
 		//csv[bi] = (FBPT)1 & (bav[bi / BPB] >> ((bi % BPB)));
 }
 
-/* Calculate next generation - CAN ONLY HANDLE TOTALISTIC ATM, ncn fixed */
-void
-ca_next_gen_ncn3_simd(
-	CA_RULE* cr,	// cellular-automaton rule
-	CA_CT* clv,		// cell-line first valid element
-	CA_CT* cli		// cell-line first invalid element
-) {
-	while (clv < cli) {
-		__m256i ymm0 = _mm256_loadu_si256(clv);
-		//_mm256_sll // shift?
-		//_mm256_slli_si256
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 1));
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 2));
-		for (int i = 0; i < 32; i += 4)
-			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
-			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
-			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
-			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
-		_mm256_storeu_si256(clv, ymm0);
-		clv += 32;
-	}
-}
-
-/* Calculate next generation - ford ONLY HANDLE absolute, ncn and ncs fixed */
-void
-ca_next_gen_abs_ncn3_ncs2_simd(
-	CA_RULE* cr,	// cellular-automaton rule
-	CA_CT* clv,		// cell-line first valid element
-	CA_CT* cli		// cell-line first invalid element
-) {
-	while (clv < cli) {
-		__m256i ymm0 = _mm256_loadu_si256(clv);
-		ymm0 = _mm256_slli_epi64(ymm0, 1);					// shift one bit to the left
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 1));
-		ymm0 = _mm256_slli_epi64(ymm0, 1);					// shift one bit to the left
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 2));
-
-
-		/*
-		//old code using propably not optimal method for shifting
-		__m256i ymm0 = _mm256_loadu_si256(clv);
-		__m128i xmm0 = _mm_setzero_si128();
-		xmm0.m128i_i64[0] = 1;
-		ymm0 = _mm256_sll_epi64(ymm0, xmm0);		// shift one bit to the left
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 1));
-		ymm0 = _mm256_sll_epi64(ymm0, xmm0);		// shift one bit to the left
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 2));
-		*/
-
-		for (int i = 0; i < 32; i += 4)
-			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
-			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
-			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
-			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
-		_mm256_storeu_si256(clv, ymm0);
-		clv += 32;
-	}
-}
-
-
-/* Calculate next generation - flexible variant - can handle totalistic and absolute rules by use of multiplication table */
-void
-ca_next_gen__sisd(
-	CA_RULE* cr,			// cellular-automaton rule
-	CA_CT* clv,				// cell-line first valid element
-	CA_CT* cli				// cell-line first invalid element
-) {
-	while (clv < cli) {
-		*clv = cr->mntl[0] * *clv;
-		for (int i = 1; i < cr->ncn; ++i)
-			*clv += cr->mntl[i] * clv[i];
-		*clv = cr->rltl[*clv];
-		++clv;
-	}
-}
-
-/* Calculate next generation - ncn fixed, can handle TOT and ABS */
-void
-ca_next_gen_ncn3_sisd(
-	CA_RULE* cr,			// cellular-automaton rule
-	CA_CT* clv,				// cell-line first valid element
-	CA_CT* cli				// cell-line first invalid element
-) {
-	while (clv < cli) {
-		*clv = cr->rltl[cr->mntl[0] * clv[0] + cr->mntl[1] * clv[1] + cr->mntl[2] * clv[2]];
-		++clv;
-	}
-}
-
-
-/* Calculate next generation - CAN ONLY HANDLE TOTALISTIC ATM   flexible variant - can handle totalistic and absolute rules by use of multiplication table */
-void
-ca_count__simd(
-	const CA_CT* csv,					// cell-space first valid element
-	const CA_CT* csf,					// cell-space element to start with
-	const CA_CT* csi,					// cell-space first invalid element
-	const UINT32* pbv,					// pixel-buffer first valid element
-	const UINT32* pbi,					// pixel-buffer first invalid element
-	const int hlzm,						// horizontal zoom
-	const int hlfs,						// horizontal focus
-	const int fsme,						// focus-mode - 0 = totalistic, 1 = absolute
-	const int ncs						// number of cell-states
-) {
-	register UINT32* pbc = pbv;			// pixel-buffer cursor / current element
-	register CA_CT* csc = csf;			// cell-space cursor / current element
-	register CA_CT* csk = csc;			// cell-space check position - initialised to equal csc in order to trigger recalculation of csk in count_check
-	register __m256i ymm0;				// used by simd operations
-
-////	register __m256i ymm0;	// running sum
-////	int mli = 32; // simd loop iterator
-////
-////count_simd:;
-////	// init running sum
-////	mm256_zeroall();
-////	for (int i = 0; i < hlfs0; ++i)
-////		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(csc + i));
-////count_simd_loop:;
-////	if (csi - csc < 32)
-////		goto count_sisd;
-////	if (csc >= csk)
-////		goto count_check;
-////	// 
-////	ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(csc + hlfs0));
-////	//
-////	register int i = mli;
-////	for (i = i - 32; i < 32; i += hlzm) {
-////		*pbc += ymm0.m256i_u8[i];
-////		++pbc;
-////	}
-////	csc += 32 / hlzm;
-////	ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(csc + hlfs0));
-////
-////	goto count_simd_loop;
-////count_sisd:
-
-// draws cell-space to fill pixel-buffer completely - if cell-space * hlzm is smaller than the pixel-buffer it will be drawn repeatedly
-	register int i;
-count_simd:;
-	if (fsme)
-		goto count_sisd;
-	if (csk - csc < 32)							// single stepping may always be necesary as pixel-buffer may be of any size
-		goto count_sisd;
-	if (csc >= csk)
-		goto count_check;
-	ymm0 = _mm256_loadu_si256(csc);
-	for (i = 1; i < hlfs; ++i)
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(csc + i));
-	for (i = 0; i < 32; i += hlzm) {
-		*pbc = ymm0.m256i_u8[i];
-		++pbc;
-		csc += hlzm;
-	}
-	goto count_simd;
-count_sisd:;
-	if (csc >= csk)
-		goto count_check;
-	*pbc += *csc;
-	for (i = 1; i < hlfs; ++i)
-		if (!fsme)
-			*pbc += csc[i];
-		else
-			*pbc += ipow(ncs, i) * csc[i];
-	++pbc;
-	csc += hlzm;
-	goto count_sisd;
-count_check:;
-	csk = csc + hlzm * (pbi - pbc);
-	if (csc >= csk)
-		goto count_finished;
-	else if (csc >= csi)
-		csc -= csi - csv,						// wrap arround cursor position at end of cell-space
-		csk = csc;								// force immediate recalculation of csk - relative to wrapp-arround-corrected cursor position - at the next loop cycle - this is to avoid repeating the calculation of csk above
-	else if (csi < csk)
-		csk = csi;
-	goto count_simd;
-count_finished:;
-}
-//
-///* Calculate next generation - flexible variant - can handle totalistic and absolute rules by use of multiplication table */
-//void
-//ca_next_gen(
-//	const CA_CT *clf,		// cell-line first element
-//	const CA_CT *clb,		// cl beginning of line
-//	const CA_CT *clwb,		// cl wrap buffer
-//	const CA_CT *cljb,		// cl joint buffer
-//	const int ncn,			// number of cells in a neighborhod
-//	const CA_CT *rltl,		// rule-table
-//	const CA_CT *mntl)		// multiplication-table
-//{
-//	/* Copy rule and multiplication table to local memory in hope to improve speed */
-//	//CA_CT rltl[LV_MAXRLTLSZ];
-//	//CA_CT mntl[LV_MAXRLTLSZ];
-//	//for (int i = 0; i < cr->nns; i++) {
-//	//	rltl[i] = cr->rltl[i];
-//	//	mntl[i] = cr->mntl[i];
-//	//}
-//
-//	register CA_CT *clc = clb;	// cell-line cursor / current element
-//	register CA_CT *clck;		// cl check position - which is either the joint-buffer or the wrap-buffer
-//	if (cljb > clc)
-//		clck = cljb;
-//	else
-//		clck = clwb;
-//
-//	while (1) {
-//		if (clc == clck)
-//			if (clc == clwb) {
-//				clc = clf;
-//				clck = cljb;
-//				continue;
-//			}
-//			else
-//				break;
-//		if (ncn == 3)
-//			*clc = rltl[mntl[0] * clc[0] + mntl[1] * clc[1] + mntl[2] * clc[2]];
-//		else {
-//			*clc = mntl[0] * *clc;
-//			for (int i = 1; i < ncn; ++i)
-//				*clc += mntl[i] * clc[i];
-//			*clc = rltl[*clc];
-//		}
-//		++clc;
-//	}
-//}
-
-/* Calculate next generation - CAN ONLY HANDLE TOTALISTIC ATM  */
-void
-ca_next_gen__simd(
-	CA_RULE* cr,	// cellular-automata rule
-	CA_CT* clv,		// cell-line first valid element
-	CA_CT* cli		// cell-line first invalid element
-) {
-	while (clv < cli) {
-		__m256i ymm0 = _mm256_loadu_si256(clv);
-		for (int i = 1; i < cr->ncn; ++i)
-			ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + i));
-		for (int i = 0; i < 32; i += 4)
-			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
-			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
-			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
-			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
-		_mm256_storeu_si256(clv, ymm0);
-		clv += 32;
-	}
-}
-
-
-
-
-
 static UINT8* calt = NULL;									// ca-lookup-table/LUT
 void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 	_aligned_free(vba->v);
@@ -1363,10 +621,563 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 	}
 }
 
+int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
+	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz);
+
+	while (pgnc) {
+		// copy wrap arround buffer
+		uint8_t* wb = vba->v;
+		wb[vba->scsz / 8] = wb[0];
+		//
+		for (int bi = 0, sz = vba->scsz / 8; bi < sz; ++bi) {
+			UINT8* bya = vba->v;  // need to adress on byte-basis
+			bya += bi;
+			*bya = calt[(((UINT32)min(3, pgnc - 1)) << 16) | *(UINT16*)bya];
+		}
+		pgnc -= min(4, pgnc);
+	}
+
+	convert_bit_array_to_CA_CT((FBPT*)vba->v, vba->clsc, vba->scsz);
+
+	return 0;
+}
+
+void CA_CNITFN_BOOL(caBitArray* vba, CA_RULE* cr) {
+	_aligned_free(vba->v);
+	vba->ct = (vba->ct + BPB - 1) / BPB * BPB + BPB;		// bit-array-count - round up count and allow one extra-element since when we process the last half block we read one half block past the end
+	vba->v = _aligned_malloc(vba->ct / 8, BYAL);
+}
+
+int64_t CA_CNFN_BOOL(int64_t pgnc, caBitArray* vba) {
+	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz + 8);
+
+	while (pgnc > 0) {
+		// copy wrap arround buffer
+		uint8_t* wb = vba->v;
+		wb[vba->scsz / 8] = wb[0];
+		// BOOLEAN go through half-blocks
+		for (int bi = 0; bi < vba->scsz / BPB * 2; ++bi) {
+			UINT8* bya = vba->v;  // need to adress on byte-basis
+			bya += bi * (BPB / 8 / 2);
+			register FBPT l;
+			l = *(FBPT*)bya;
+
+			for (int tc = 0; tc < min(4, pgnc); ++tc) {
+				// rule 147 - not(b xor (a and c)) - https://www.wolframalpha.com/input/?i=not%28b+xor+%28a+and+c%29%29
+				//l = ~((l >> 1) ^ (l & (l >> 2)));
+				// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+				l = (l >> 1) ^ (l | (l >> 2));
+			}
+			*(HBPT*)bya = (HBPT)l;
+		}
+		pgnc -= min(4, pgnc);
+	}
+
+	convert_bit_array_to_CA_CT((FBPT*)vba->v, vba->clsc, vba->scsz);
+
+	return 0;
+}
+
+int64_t CA_CNFN_SIMD(int64_t pgnc, caBitArray* vba) {
+	while (pgnc > 0) {
+		pgnc--;
+		memcpy(vba->clsc + vba->scsz, vba->clsc, vba->brsz * sizeof * vba->clsc);
+
+		if (vba->cr->tp == TOT)
+			if (vba->cr->ncn == 3)
+				ca_next_gen_ncn3_simd(vba->cr, vba->clsc, vba->clsc + vba->scsz);
+			else
+				ca_next_gen__simd(vba->cr, vba->clsc, vba->clsc + vba->scsz);
+		else
+			if (vba->cr->ncn == 3)
+				if (vba->cr->ncs == 2)
+					ca_next_gen_abs_ncn3_ncs2_simd(vba->cr, vba->clsc, vba->clsc + vba->scsz);
+				else
+					printf("ERROR ruleset not supported in this computing-mode\n");
+	}
+	return 0;
+}
+
+int64_t CA_CNFN_SISD(int64_t pgnc, caBitArray* vba) {
+	while (pgnc > 0) {
+		pgnc--;
+		memcpy(vba->clsc + vba->scsz, vba->clsc, vba->brsz * sizeof * vba->clsc);
+
+		if (vba->cr->ncn == 3)
+			ca_next_gen_ncn3_sisd(vba->cr, vba->clsc, vba->clsc + vba->scsz);
+		else
+			ca_next_gen__sisd(vba->cr, vba->clsc, vba->clsc + vba->scsz);
+	}
+	return 0;
+}
+
+void CA_CNITFN_DISABLED(caBitArray* vba, CA_RULE* cr) {
+}
+
+int64_t CA_CNFN_DISABLED(int64_t pgnc, caBitArray* vba) {
+	printf("CM_DISABLED  computation disabled!\n");
+	return 0;
+}
+
+void CA_CNITFN_OMP_VBA_8x32(caBitArray* vba, CA_RULE* cr) {
+	vba->lc = 8;
+	vba->lw = 32;
+	vba->mmwn = 4;
+	initCABitArray(vba, cr);
+}
+
+void CA_CNITFN_VBA_16x256(caBitArray* vba, CA_RULE* cr) {
+	vba->lc = 1;
+	vba->lw = 256;
+	vba->mmwn = 8;
+	vba->oc = 14;
+	initCABitArray(vba, cr);
+}
+
+void CA_CNITFN_OMP_VBA_8x1x256(caBitArray* vba, CA_RULE* cr) {
+	vba->lc = 2;
+	vba->lw = 512;
+	vba->mmwn = 4;
+	vba->oc = 4;
+	initCABitArray(vba, cr);
+}
+
+int64_t CA_CNFN_OMP_VBA_8x1x256(int64_t pgnc, caBitArray* vba) {
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+
+#pragma omp parallel num_threads(2)
+	{
+		int ln = omp_get_thread_num();
+		int gnc = pgnc;
+		while (gnc-- > 0) {
+			//
+//#pragma omp barrier
+			//{
+			//	//				CABitArrayPrepareOR(vba, ln * 512, (ln + 1) * 512);
+			//	int bbrw = vba->rw / VBBB;			// bit-blocks per row
+			//	int from = ln * 512 / VBBB;
+			//	int to = (ln + 1) * 512 / VBBB;
+			//	for (int c = from; c < to; ++c) {
+			//		vba->v[(0 + vba->rc) * bbrw + c] = (vba->v[0 * bbrw + c] >> 1) | (vba->v[0 * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+			//		vba->v[(1 + vba->rc) * bbrw + c] = (vba->v[1 * bbrw + c] >> 1) | (vba->v[1 * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+			//	}
+			//	//				printf("SYNC  gnc %d  ln %d\n", gnc, ln);
+			//}
+//#pragma omp barrier
+			//
+			__m256i* vbac;
+			vbac = (__m256i*)vba->v + ln * 2;
+			for (int ri = 0; ri < vba->rc; ++ri) {
+				//				printf("gnc %d  ln %d  ri %d  vbac %p  vbai %p\n", gnc, ln, ri, vbac, (char*)vba->v + vba->sz);
+								// first lane
+				__m256i ymm0 = _mm256_load_si256(vbac + 0);
+				__m256i ymm1 = _mm256_load_si256(vbac + 4);
+				__m256i ymm2 = _mm256_load_si256(vbac + 8);
+				ymm0 = _mm256_or_si256(ymm0, ymm2);
+				ymm0 = _mm256_xor_si256(ymm0, ymm1);
+				_mm256_store_si256(vbac + 0, ymm0);
+				// second lane
+				__m256i ymm3 = _mm256_load_si256(vbac + 1);
+				__m256i ymm4 = _mm256_load_si256(vbac + 5);
+				__m256i ymm5 = _mm256_load_si256(vbac + 9);
+				ymm3 = _mm256_or_si256(ymm3, ymm5);
+				ymm3 = _mm256_xor_si256(ymm3, ymm4);
+				_mm256_store_si256(vbac + 1, ymm3);
+				//
+				vbac += 4;
+			}
+		}
+	}
+
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return 0;
+}
+
+#define NMTS 8			// number of threads
+void CA_CNITFN_OMP_TEST(caBitArray* vba, CA_RULE* cr) {
+	vba->lc = NMTS;
+	vba->lw = 256;
+	vba->mmwn = 4;
+	initCABitArray(vba, cr);
+}
+
+/*
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	while (gnc > 0) {
+		gnc--;
+		CABitArrayPrepareOR(vba, 0, 0);
+		__m256i* vbac = (__m256i*)vba->v;
+		int rc = vba->rc;
+		register __m256i ymm0;
+		for (int ri = 0; ri < rc; ++ri) {
+			ymm0 = _mm256_or_si256(_mm256_load_si256(vbac + ri), _mm256_load_si256(vbac + ri + 2));
+			ymm0 = _mm256_xor_si256(ymm0, _mm256_load_si256(vbac + ri + 1));
+			_mm256_store_si256(vbac + ri, ymm0);
+		}
+	}
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return gnc;
+*/
+
+/*
+
+from, to		in bits, must be multiple of size of ba->v type (currently 32)
+
+__inline
+void
+CABitArrayPrepareOR(caBitArray* ba, int from, int to) {
+	int bbrw = ba->rw / VBBB;			// bit-blocks per row
+	if (to == 0)
+		to = bbrw;
+	else
+		to = to / VBBB;
+	for (int r = 0; r < ba->oc; ++r) {
+		for (int c = from / VBBB; c < to; ++c) {
+			ba->v[(r + ba->rc) * bbrw + c] =
+				(ba->v[r * bbrw + c] >> 1) | (ba->v[r * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+			//			printf("VB OR  bbrw %d  x %d  x+1 %d %d\n", bbrw, c, (c + 1) & (bbrw - 1), ((c + 1) % bbrw));
+		}
+	}
+}*/
+
+int64_t CA_CNFN_OMP_TEST(int64_t pgnc, caBitArray* vba) {
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	CABitArrayPrepareOR(vba, 0, 0);
+
+	int rc = vba->rc;			// row-count
+	int oc = vba->oc;			// overflow-count
+	int bbrw = vba->rw >> VBBTBTCTPT;			// bit-blocks per row
+
+	__m256i* vm256i = (__m256i*)vba->v;										// first valid element / array-pointer to bit array
+	omp_set_num_threads(NMTS);
+	//printf("num thread 5D\n", );
+
+	__m256i ymm0, ymm1, ymm2;
+
+#pragma omp parallel default(none) private(ymm0, ymm1, ymm2) shared(bbrw, vba, oc, rc, vm256i, pgnc)
+	{
+		int64_t gnc = pgnc;
+		int tdnm = omp_get_thread_num();		// thread-number
+		__m256i* vbac = vm256i + tdnm;
+
+
+		while (gnc > 0) {
+			gnc--;
+			//#pragma omp master
+			//{
+			//	CABitArrayPrepareOR(vba, 0, 0);
+			//}
+
+			//#pragma omp barrier
+			//for (int r = 0; r < oc; ++r) {
+			//	for (int c = 256 * tdnm / VBBB; c < 256 * (tdnm + 1) / VBBB; ++c) {
+			//		vba->v[(r + vba->rc) * bbrw + c] =
+			//			(vba->v[r * bbrw + c] >> 1) | (vba->v[r * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+			//	}
+			//}
+#pragma omp barrier
+
+//#pragma omp parallel
+			for (int ri = 0; ri < rc; ++ri) {
+				///printf_s("Thread %d  gnc %lld  %p  %p\n", omp_get_thread_num(), gnc, vbac + (ri + 0) * NMTS, vbac + (ri + 1) * NMTS);
+				//printf_s("Thread %d  bb %d  gnc %lld\n", omp_get_thread_num(), tdnm + ri * NMTS, gnc);
+				ymm0 = _mm256_load_si256(vbac + NMTS * (ri + 0));
+				ymm1 = _mm256_load_si256(vbac + NMTS * (ri + 1));
+				ymm2 = _mm256_load_si256(vbac + NMTS * (ri + 2));
+				ymm0 = _mm256_or_si256(ymm0, ymm2);
+				ymm0 = _mm256_xor_si256(ymm0, ymm1);
+				_mm256_store_si256(vbac + ri * NMTS, ymm0);
+			}
+		}
+	}
+
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+
+	return 0;
+}
+
+int64_t CA_CNFN_VBA_16x256(int64_t pgnc, caBitArray* vba) {
+	// WORK IN PROGRESS
+	/* Idea is to use all 16 AVX regsiters */
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	while (pgnc > 0) {
+		pgnc -= 4;
+		CABitArrayPrepareOR(vba, 0, 0);
+
+		register __m256i ymm0, ymm1, ymm2, ymm3, ymm4, ymm5, ymm6, ymm7;
+		register __m256i ymm8, ymm9;
+		register __m256i ymm10, ymm11, ymm12, ymm13, ymm14, ymm15;
+
+		for (int ri = 0; ri < vba->rc; ri += 8) {
+			__m256i* vbac = (__m256i*)vba->v + ri;
+
+			ymm0 = _mm256_load_si256(vbac + 0);
+			ymm1 = _mm256_load_si256(vbac + 1);
+			ymm2 = _mm256_load_si256(vbac + 2);
+			ymm3 = _mm256_load_si256(vbac + 3);
+			ymm4 = _mm256_load_si256(vbac + 4);
+			ymm5 = _mm256_load_si256(vbac + 5);
+			ymm6 = _mm256_load_si256(vbac + 6);
+			ymm7 = _mm256_load_si256(vbac + 7);
+			ymm8 = _mm256_load_si256(vbac + 8);
+			ymm9 = _mm256_load_si256(vbac + 9);
+			ymm10 = _mm256_load_si256(vbac + 10);
+			ymm11 = _mm256_load_si256(vbac + 11);
+			ymm12 = _mm256_load_si256(vbac + 12);
+			ymm13 = _mm256_load_si256(vbac + 13);
+			ymm14 = _mm256_load_si256(vbac + 14);
+			ymm15 = _mm256_load_si256(vbac + 15);
+
+			ymm0 = _mm256_or_si256(ymm0, ymm2);		 ymm0 = _mm256_xor_si256(ymm0, ymm1);
+			ymm1 = _mm256_or_si256(ymm1, ymm3);		 ymm1 = _mm256_xor_si256(ymm1, ymm2);
+			ymm2 = _mm256_or_si256(ymm2, ymm4);		 ymm2 = _mm256_xor_si256(ymm2, ymm3);
+			ymm3 = _mm256_or_si256(ymm3, ymm5);		 ymm3 = _mm256_xor_si256(ymm3, ymm4);
+			ymm4 = _mm256_or_si256(ymm4, ymm6);		 ymm4 = _mm256_xor_si256(ymm4, ymm5);
+			ymm5 = _mm256_or_si256(ymm5, ymm7);		 ymm5 = _mm256_xor_si256(ymm5, ymm6);
+			ymm6 = _mm256_or_si256(ymm6, ymm8);		 ymm6 = _mm256_xor_si256(ymm6, ymm7);
+			ymm7 = _mm256_or_si256(ymm7, ymm9);		 ymm7 = _mm256_xor_si256(ymm7, ymm8);
+			ymm8 = _mm256_or_si256(ymm8, ymm10);		 ymm8 = _mm256_xor_si256(ymm8, ymm9);
+			ymm9 = _mm256_or_si256(ymm9, ymm11);		 ymm9 = _mm256_xor_si256(ymm9, ymm10);
+			ymm10 = _mm256_or_si256(ymm10, ymm12);		ymm10 = _mm256_xor_si256(ymm10, ymm11);
+			ymm11 = _mm256_or_si256(ymm11, ymm13);		ymm11 = _mm256_xor_si256(ymm11, ymm12);
+			ymm12 = _mm256_or_si256(ymm12, ymm14);		ymm12 = _mm256_xor_si256(ymm12, ymm13);
+			ymm13 = _mm256_or_si256(ymm13, ymm15);		ymm13 = _mm256_xor_si256(ymm13, ymm14);
+
+			ymm0 = _mm256_or_si256(ymm0, ymm2);		 ymm0 = _mm256_xor_si256(ymm0, ymm1);
+			ymm1 = _mm256_or_si256(ymm1, ymm3);		 ymm1 = _mm256_xor_si256(ymm1, ymm2);
+			ymm2 = _mm256_or_si256(ymm2, ymm4);		 ymm2 = _mm256_xor_si256(ymm2, ymm3);
+			ymm3 = _mm256_or_si256(ymm3, ymm5);		 ymm3 = _mm256_xor_si256(ymm3, ymm4);
+			ymm4 = _mm256_or_si256(ymm4, ymm6);		 ymm4 = _mm256_xor_si256(ymm4, ymm5);
+			ymm5 = _mm256_or_si256(ymm5, ymm7);		 ymm5 = _mm256_xor_si256(ymm5, ymm6);
+			ymm6 = _mm256_or_si256(ymm6, ymm8);		 ymm6 = _mm256_xor_si256(ymm6, ymm7);
+			ymm7 = _mm256_or_si256(ymm7, ymm9);		 ymm7 = _mm256_xor_si256(ymm7, ymm8);
+			ymm8 = _mm256_or_si256(ymm8, ymm10);		 ymm8 = _mm256_xor_si256(ymm8, ymm9);
+			ymm9 = _mm256_or_si256(ymm9, ymm11);		 ymm9 = _mm256_xor_si256(ymm9, ymm10);
+			ymm10 = _mm256_or_si256(ymm10, ymm12);		ymm10 = _mm256_xor_si256(ymm10, ymm11);
+			ymm11 = _mm256_or_si256(ymm11, ymm13);		ymm11 = _mm256_xor_si256(ymm11, ymm12);
+
+			ymm0 = _mm256_or_si256(ymm0, ymm2);		 ymm0 = _mm256_xor_si256(ymm0, ymm1);
+			ymm1 = _mm256_or_si256(ymm1, ymm3);		 ymm1 = _mm256_xor_si256(ymm1, ymm2);
+			ymm2 = _mm256_or_si256(ymm2, ymm4);		 ymm2 = _mm256_xor_si256(ymm2, ymm3);
+			ymm3 = _mm256_or_si256(ymm3, ymm5);		 ymm3 = _mm256_xor_si256(ymm3, ymm4);
+			ymm4 = _mm256_or_si256(ymm4, ymm6);		 ymm4 = _mm256_xor_si256(ymm4, ymm5);
+			ymm5 = _mm256_or_si256(ymm5, ymm7);		 ymm5 = _mm256_xor_si256(ymm5, ymm6);
+			ymm6 = _mm256_or_si256(ymm6, ymm8);		 ymm6 = _mm256_xor_si256(ymm6, ymm7);
+			ymm7 = _mm256_or_si256(ymm7, ymm9);		 ymm7 = _mm256_xor_si256(ymm7, ymm8);
+			ymm8 = _mm256_or_si256(ymm8, ymm10);		 ymm8 = _mm256_xor_si256(ymm8, ymm9);
+			ymm9 = _mm256_or_si256(ymm9, ymm11);		 ymm9 = _mm256_xor_si256(ymm9, ymm10);
+
+			ymm0 = _mm256_or_si256(ymm0, ymm2);		 ymm0 = _mm256_xor_si256(ymm0, ymm1);
+			ymm1 = _mm256_or_si256(ymm1, ymm3);		 ymm1 = _mm256_xor_si256(ymm1, ymm2);
+			ymm2 = _mm256_or_si256(ymm2, ymm4);		 ymm2 = _mm256_xor_si256(ymm2, ymm3);
+			ymm3 = _mm256_or_si256(ymm3, ymm5);		 ymm3 = _mm256_xor_si256(ymm3, ymm4);
+			ymm4 = _mm256_or_si256(ymm4, ymm6);		 ymm4 = _mm256_xor_si256(ymm4, ymm5);
+			ymm5 = _mm256_or_si256(ymm5, ymm7);		 ymm5 = _mm256_xor_si256(ymm5, ymm6);
+			ymm6 = _mm256_or_si256(ymm6, ymm8);		 ymm6 = _mm256_xor_si256(ymm6, ymm7);
+			ymm7 = _mm256_or_si256(ymm7, ymm9);		 ymm7 = _mm256_xor_si256(ymm7, ymm8);
+
+			_mm256_store_si256(vbac + 0, ymm0);
+			_mm256_store_si256(vbac + 1, ymm1);
+			_mm256_store_si256(vbac + 2, ymm2);
+			_mm256_store_si256(vbac + 3, ymm3);
+			_mm256_store_si256(vbac + 4, ymm4);
+			_mm256_store_si256(vbac + 5, ymm5);
+			_mm256_store_si256(vbac + 6, ymm6);
+			_mm256_store_si256(vbac + 7, ymm7);
+		}
+	}
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return 0;
+}
+
+void CA_CNITFN_VBA_2x256(caBitArray* vba, CA_RULE* cr) {
+	vba->lc = 2;
+	vba->lw = 256;
+	vba->mmwn = 8;
+	vba->oc = 2;
+	initCABitArray(vba, cr);
+}
+
+void CA_CNITFN_VBA_1x32(caBitArray* vba, CA_RULE* cr) {
+	vba->lc = 1;
+	vba->lw = 32;
+	vba->mmwn = 64;
+	initCABitArray(vba, cr);
+}
+
+void CA_CNITFN_VBA_1x64(caBitArray* vba, CA_RULE* cr) {
+	vba->lc = 1;
+	vba->lw = 64;
+	vba->mmwn = 32;
+	initCABitArray(vba, cr);
+}
+
+void CA_CNITFN_VBA_2x32(caBitArray* vba, CA_RULE* cr) {
+	vba->lc = 2;
+	vba->lw = 32;
+	vba->mmwn = 32;
+	initCABitArray(vba, cr);
+}
+
+void CA_CNITFN_VBA_4x32(caBitArray* vba, CA_RULE* cr) {
+	vba->lc = 4;
+	vba->lw = 32;
+	vba->mmwn = 16;
+	initCABitArray(vba, cr);
+}
+
+void CA_CNITFN_VBA_1x256(caBitArray* vba, CA_RULE* cr) {
+	vba->lc = 1;
+	vba->lw = 256;
+	vba->mmwn = 32;
+	initCABitArray(vba, cr);
+}
+
+int64_t CA_CNFN_VBA_1x32(int64_t pgnc, caBitArray* vba) {
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	while (pgnc > 0) {
+		CABitArrayPrepareOR(vba, 0, 0);
+
+		UINT32* vbac = (UINT32*)vba->v;
+		for (int ri = 0; ri < vba->rc; ++ri) {
+			vbac[ri] = vbac[ri + 1] ^ (vbac[ri] | vbac[ri + 2]);				// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+		}
+
+		pgnc--;
+	}
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return 0;
+}
+
+int64_t CA_CNFN_VBA_2x32(int64_t pgnc, caBitArray* vba) {
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	while (pgnc > 0) {
+		CABitArrayPrepareOR(vba, 0, 0);
+
+		UINT32* vbac = (UINT32*)vba->v;
+		for (int ri = 0; ri < vba->rc * 2; ri += 2) {
+			vbac[ri + 0] = vbac[ri + 2] ^ (vbac[ri + 0] | vbac[ri + 4]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+			vbac[ri + 1] = vbac[ri + 3] ^ (vbac[ri + 1] | vbac[ri + 5]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+		}
+
+		pgnc--;
+	}
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return 0;
+}
+
+int64_t CA_CNFN_VBA_4x32(int64_t pgnc, caBitArray* vba) {
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	while (pgnc > 0) {
+		CABitArrayPrepareOR(vba, 0, 0);
+
+		UINT32* vbac = (UINT32*)vba->v;
+		for (int ri = 0; ri < vba->rc * 4; ri += 4) {
+			vbac[ri + 0] = vbac[ri + 4] ^ (vbac[ri + 0] | vbac[ri + 8]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+			vbac[ri + 1] = vbac[ri + 5] ^ (vbac[ri + 1] | vbac[ri + 9]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+			vbac[ri + 2] = vbac[ri + 6] ^ (vbac[ri + 2] | vbac[ri + 10]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+			vbac[ri + 3] = vbac[ri + 7] ^ (vbac[ri + 3] | vbac[ri + 11]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+		}
+
+		pgnc--;
+	}
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return 0;
+}
+
+int64_t CA_CNFN_OMP_VBA_8x32(int64_t pgnc, caBitArray* vba) {
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	while (pgnc > 0) {
+		CABitArrayPrepareOR(vba, 0, 0);
+
+		int ln;// , ri;
+		int c = 0;
+#pragma omp parallel for //private (vbac, ln, ri)
+		for (ln = 0; ln < 8; ln++) {
+			UINT32* vbac;
+			vbac = (UINT32*)vba->v + ln;
+			for (int ri = 0; ri < vba->rc * 8; ri += 8) {
+				++c;
+				vbac[ri] = vbac[ri + 8] ^ (vbac[ri] | vbac[ri + 16]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+			}
+		}
+		//printf("c %d\n", c);
+
+		pgnc--;
+	}
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return 0;
+}
+
+int64_t CA_CNFN_VBA_1x64(int64_t pgnc, caBitArray* vba) {
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	while (pgnc > 0) {
+		CABitArrayPrepareOR(vba, 0, 0);
+
+		UINT64* vbac = (UINT64*)vba->v;
+		for (int ri = 0; ri < vba->rc; ++ri) {
+			vbac[ri] = vbac[ri + 1] ^ (vbac[ri] | vbac[ri + 2]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+		}
+
+		pgnc--;
+	}
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return 0;
+}
+
+int64_t CA_CNFN_VBA_1x256(int64_t gnc, caBitArray* vba) {
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	while (gnc > 0) {
+		gnc--;
+		CABitArrayPrepareOR(vba, 0, 0);
+		__m256i* vbac = (__m256i*)vba->v;
+		int rc = vba->rc;
+		register __m256i ymm0;
+		for (int ri = 0; ri < rc; ++ri) {
+			ymm0 = _mm256_or_si256(_mm256_load_si256(vbac + ri), _mm256_load_si256(vbac + ri + 2));
+			ymm0 = _mm256_xor_si256(ymm0, _mm256_load_si256(vbac + ri + 1));
+			_mm256_store_si256(vbac + ri, ymm0);
+			// works, but seems to be slower
+			//*((__m256i*)vba->v + ri) = _mm256_or_si256(*((__m256i*)vba->v + ri), *((__m256i*)vba->v + ri + 2));
+			//*((__m256i*)vba->v + ri) = _mm256_xor_si256(*((__m256i*)vba->v + ri), *((__m256i*)vba->v + ri + 1));
+		}
+	}
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return gnc;
+}
+
+int64_t CA_CNFN_VBA_2x256(int64_t pgnc, caBitArray* vba) {
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	while (pgnc > 0) {
+		CABitArrayPrepareOR(vba, 0, 0);
+
+		__m256i* vbac = (__m256i*)vba->v;
+		for (int ri = 0; ri < vba->rc * 2; ri += 2) {
+			// first lane
+			__m256i ymm0 = _mm256_load_si256(vbac + ri + 0);
+			__m256i ymm1 = _mm256_load_si256(vbac + ri + 2);
+			__m256i ymm2 = _mm256_load_si256(vbac + ri + 4);
+			ymm0 = _mm256_or_si256(ymm0, ymm2);
+			ymm0 = _mm256_xor_si256(ymm0, ymm1);
+			_mm256_store_si256(vbac + ri + 0, ymm0);
+			// second lane
+			__m256i ymm3 = _mm256_load_si256(vbac + ri + 1);
+			__m256i ymm4 = _mm256_load_si256(vbac + ri + 3);
+			__m256i ymm5 = _mm256_load_si256(vbac + ri + 5);
+			ymm3 = _mm256_or_si256(ymm3, ymm5);
+			ymm3 = _mm256_xor_si256(ymm3, ymm4);
+			_mm256_store_si256(vbac + ri + 1, ymm3);
+		}
+
+		pgnc--;
+	}
+	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+	return 0;
+}
+
+/************************* Hach Computation Mode *************************/
 
 /* Hash-Cell*/
-
-
 typedef UINT32 HCI;							// hash-cell-index-type
 #define HCITPBYC 4							// hash-cell-index-type-byte-count
 UINT32 HCISZPT = 20;						// hash-cell-index-size as power of two, i.e. 8 = index size of 256;
@@ -2072,114 +1883,264 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 	//printf("press any key\n");  getch();
 }
 
-int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
-	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz);
+/************************* Routines operating directly on (byte-based) cell-space *************************/
 
-	while (pgnc) {
-		// copy wrap arround buffer
-		uint8_t* wb = vba->v;
-		wb[vba->scsz / 8] = wb[0];
-		//
-		for (int bi = 0, sz = vba->scsz / 8; bi < sz; ++bi) {
-			UINT8* bya = vba->v;  // need to adress on byte-basis
-			bya += bi;
-			*bya = calt[(((UINT32)min(3, pgnc - 1)) << 16) | *(UINT16*)bya];
-		}
-		pgnc -= min(4, pgnc);
+/* Calculate next generation - CAN ONLY HANDLE TOTALISTIC ATM, ncn fixed */
+void
+ca_next_gen_ncn3_simd(
+	CA_RULE* cr,										// cellular-automaton rule
+	CA_CT* clv,											// cell-line first valid element
+	CA_CT* cli											// cell-line first invalid element
+) {
+	while (clv < cli) {
+		__m256i ymm0 = _mm256_loadu_si256(clv);
+		//_mm256_sll // shift?
+		//_mm256_slli_si256
+		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 1));
+		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 2));
+		for (int i = 0; i < 32; i += 4)
+			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
+			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
+			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
+			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
+		_mm256_storeu_si256(clv, ymm0);
+		clv += 32;
 	}
-
-	convert_bit_array_to_CA_CT((FBPT*)vba->v, vba->clsc, vba->scsz);
-
-	return 0;
 }
 
-void CA_CNITFN_BOOL(caBitArray* vba, CA_RULE* cr) {
-	_aligned_free(vba->v);
-	vba->ct = (vba->ct + BPB - 1) / BPB * BPB + BPB;		// bit-array-count - round up count and allow one extra-element since when we process the last half block we read one half block past the end
-	vba->v = _aligned_malloc(vba->ct / 8, BYAL);
-}
+/* Calculate next generation - ford ONLY HANDLE absolute, ncn and ncs fixed */
+void
+ca_next_gen_abs_ncn3_ncs2_simd(
+	CA_RULE* cr,										// cellular-automaton rule
+	CA_CT* clv,											// cell-line first valid element
+	CA_CT* cli											// cell-line first invalid element
+) {
+	while (clv < cli) {
+		__m256i ymm0 = _mm256_loadu_si256(clv);
+		ymm0 = _mm256_slli_epi64(ymm0, 1);					// shift one bit to the left
+		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 1));
+		ymm0 = _mm256_slli_epi64(ymm0, 1);					// shift one bit to the left
+		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 2));
 
-int64_t CA_CNFN_BOOL(int64_t pgnc, caBitArray* vba) {
-	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz + 8);
 
-	while (pgnc > 0) {
-		// copy wrap arround buffer
-		uint8_t* wb = vba->v;
-		wb[vba->scsz / 8] = wb[0];
-		// BOOLEAN go through half-blocks
-		for (int bi = 0; bi < vba->scsz / BPB * 2; ++bi) {
-			UINT8* bya = vba->v;  // need to adress on byte-basis
-			bya += bi * (BPB / 8 / 2);
-			register FBPT l;
-			l = *(FBPT*)bya;
+		/*
+		//old code using propably not optimal method for shifting
+		__m256i ymm0 = _mm256_loadu_si256(clv);
+		__m128i xmm0 = _mm_setzero_si128();
+		xmm0.m128i_i64[0] = 1;
+		ymm0 = _mm256_sll_epi64(ymm0, xmm0);		// shift one bit to the left
+		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 1));
+		ymm0 = _mm256_sll_epi64(ymm0, xmm0);		// shift one bit to the left
+		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 2));
+		*/
 
-			for (int tc = 0; tc < min(4, pgnc); ++tc) {
-				// rule 147 - not(b xor (a and c)) - https://www.wolframalpha.com/input/?i=not%28b+xor+%28a+and+c%29%29
-				//l = ~((l >> 1) ^ (l & (l >> 2)));
-				// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
-				l = (l >> 1) ^ (l | (l >> 2));
-			}
-			*(HBPT*)bya = (HBPT)l;
-		}
-		pgnc -= min(4, pgnc);
+		for (int i = 0; i < 32; i += 4)
+			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
+			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
+			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
+			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
+		_mm256_storeu_si256(clv, ymm0);
+		clv += 32;
 	}
-
-	convert_bit_array_to_CA_CT((FBPT*)vba->v, vba->clsc, vba->scsz);
-
-	return 0;
 }
 
-int64_t CA_CNFN_SIMD(int64_t pgnc, caBitArray* vba) {
-	while (pgnc > 0) {
-		pgnc--;
-		memcpy(vba->clsc + vba->scsz, vba->clsc, vba->brsz * sizeof * vba->clsc);
 
-		if (vba->cr->tp == TOT)
-			if (vba->cr->ncn == 3)
-				ca_next_gen_ncn3_simd(vba->cr, vba->clsc, vba->clsc + vba->scsz);
-			else
-				ca_next_gen__simd(vba->cr, vba->clsc, vba->clsc + vba->scsz);
+/* Calculate next generation - flexible variant - can handle totalistic and absolute rules by use of multiplication table */
+void
+ca_next_gen__sisd(
+	CA_RULE* cr,										// cellular-automaton rule
+	CA_CT* clv,											// cell-line first valid element
+	CA_CT* cli											// cell-line first invalid element
+) {
+	while (clv < cli) {
+		*clv = cr->mntl[0] * *clv;
+		for (int i = 1; i < cr->ncn; ++i)
+			*clv += cr->mntl[i] * clv[i];
+		*clv = cr->rltl[*clv];
+		++clv;
+	}
+}
+
+/* Calculate next generation - ncn fixed, can handle TOT and ABS */
+void
+ca_next_gen_ncn3_sisd(
+	CA_RULE* cr,										// cellular-automaton rule
+	CA_CT* clv,											// cell-line first valid element
+	CA_CT* cli											// cell-line first invalid element
+) {
+	while (clv < cli) {
+		*clv = cr->rltl[cr->mntl[0] * clv[0] + cr->mntl[1] * clv[1] + cr->mntl[2] * clv[2]];
+		++clv;
+	}
+}
+
+/* Calculate next generation - CAN ONLY HANDLE TOTALISTIC ATM   flexible variant - can handle totalistic and absolute rules by use of multiplication table */
+void
+ca_count__simd(
+	const CA_CT* csv,									// cell-space first valid element
+	const CA_CT* csf,									// cell-space element to start with
+	const CA_CT* csi,									// cell-space first invalid element
+	const UINT32* pbv,									// pixel-buffer first valid element
+	const UINT32* pbi,									// pixel-buffer first invalid element
+	const int hlzm,										// horizontal zoom
+	const int hlfs,										// horizontal focus
+	const int fsme,										// focus-mode - 0 = totalistic, 1 = absolute
+	const int ncs										// number of cell-states
+) {
+	register UINT32* pbc = pbv;							// pixel-buffer cursor / current element
+	register CA_CT* csc = csf;							// cell-space cursor / current element
+	register CA_CT* csk = csc;							// cell-space check position - initialised to equal csc in order to trigger recalculation of csk in count_check
+	register __m256i ymm0;								// used by simd operations
+
+	////	register __m256i ymm0;	// running sum
+	////	int mli = 32; // simd loop iterator
+	////
+	////count_simd:;
+	////	// init running sum
+	////	mm256_zeroall();
+	////	for (int i = 0; i < hlfs0; ++i)
+	////		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(csc + i));
+	////count_simd_loop:;
+	////	if (csi - csc < 32)
+	////		goto count_sisd;
+	////	if (csc >= csk)
+	////		goto count_check;
+	////	// 
+	////	ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(csc + hlfs0));
+	////	//
+	////	register int i = mli;
+	////	for (i = i - 32; i < 32; i += hlzm) {
+	////		*pbc += ymm0.m256i_u8[i];
+	////		++pbc;
+	////	}
+	////	csc += 32 / hlzm;
+	////	ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(csc + hlfs0));
+	////
+	////	goto count_simd_loop;
+	////count_sisd:
+
+	// draws cell-space to fill pixel-buffer completely - if cell-space * hlzm is smaller than the pixel-buffer it will be drawn repeatedly
+	register int i;
+count_simd:;
+	if (fsme)
+		goto count_sisd;
+	if (csk - csc < 32)							// single stepping may always be necesary as pixel-buffer may be of any size
+		goto count_sisd;
+	if (csc >= csk)
+		goto count_check;
+	ymm0 = _mm256_loadu_si256(csc);
+	for (i = 1; i < hlfs; ++i)
+		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(csc + i));
+	for (i = 0; i < 32; i += hlzm) {
+		*pbc = ymm0.m256i_u8[i];
+		++pbc;
+		csc += hlzm;
+	}
+	goto count_simd;
+count_sisd:;
+	if (csc >= csk)
+		goto count_check;
+	*pbc += *csc;
+	for (i = 1; i < hlfs; ++i)
+		if (!fsme)
+			*pbc += csc[i];
 		else
-			if (vba->cr->ncn == 3)
-				if (vba->cr->ncs == 2)
-					ca_next_gen_abs_ncn3_ncs2_simd(vba->cr, vba->clsc, vba->clsc + vba->scsz);
-				else
-					printf("ERROR ruleset not supported in this computing-mode\n");
+			*pbc += ipow(ncs, i) * csc[i];
+	++pbc;
+	csc += hlzm;
+	goto count_sisd;
+count_check:;
+	csk = csc + hlzm * (pbi - pbc);
+	if (csc >= csk)
+		goto count_finished;
+	else if (csc >= csi)
+		csc -= csi - csv,						// wrap arround cursor position at end of cell-space
+		csk = csc;								// force immediate recalculation of csk - relative to wrapp-arround-corrected cursor position - at the next loop cycle - this is to avoid repeating the calculation of csk above
+	else if (csi < csk)
+		csk = csi;
+	goto count_simd;
+count_finished:;
+}
+//
+///* Calculate next generation - flexible variant - can handle totalistic and absolute rules by use of multiplication table */
+//void
+//ca_next_gen(
+//	const CA_CT *clf,		// cell-line first element
+//	const CA_CT *clb,		// cl beginning of line
+//	const CA_CT *clwb,		// cl wrap buffer
+//	const CA_CT *cljb,		// cl joint buffer
+//	const int ncn,			// number of cells in a neighborhod
+//	const CA_CT *rltl,		// rule-table
+//	const CA_CT *mntl)		// multiplication-table
+//{
+//	/* Copy rule and multiplication table to local memory in hope to improve speed */
+//	//CA_CT rltl[LV_MAXRLTLSZ];
+//	//CA_CT mntl[LV_MAXRLTLSZ];
+//	//for (int i = 0; i < cr->nns; i++) {
+//	//	rltl[i] = cr->rltl[i];
+//	//	mntl[i] = cr->mntl[i];
+//	//}
+//
+//	register CA_CT *clc = clb;	// cell-line cursor / current element
+//	register CA_CT *clck;		// cl check position - which is either the joint-buffer or the wrap-buffer
+//	if (cljb > clc)
+//		clck = cljb;
+//	else
+//		clck = clwb;
+//
+//	while (1) {
+//		if (clc == clck)
+//			if (clc == clwb) {
+//				clc = clf;
+//				clck = cljb;
+//				continue;
+//			}
+//			else
+//				break;
+//		if (ncn == 3)
+//			*clc = rltl[mntl[0] * clc[0] + mntl[1] * clc[1] + mntl[2] * clc[2]];
+//		else {
+//			*clc = mntl[0] * *clc;
+//			for (int i = 1; i < ncn; ++i)
+//				*clc += mntl[i] * clc[i];
+//			*clc = rltl[*clc];
+//		}
+//		++clc;
+//	}
+//}
+
+/* Calculate next generation - CAN ONLY HANDLE TOTALISTIC ATM  */
+void
+ca_next_gen__simd(
+	CA_RULE* cr,	// cellular-automata rule
+	CA_CT* clv,		// cell-line first valid element
+	CA_CT* cli		// cell-line first invalid element
+) {
+	while (clv < cli) {
+		__m256i ymm0 = _mm256_loadu_si256(clv);
+		for (int i = 1; i < cr->ncn; ++i)
+			ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + i));
+		for (int i = 0; i < 32; i += 4)
+			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
+			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
+			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
+			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
+		_mm256_storeu_si256(clv, ymm0);
+		clv += 32;
 	}
-	return 0;
 }
 
-int64_t CA_CNFN_SISD(int64_t pgnc, caBitArray* vba) {
-	while (pgnc > 0) {
-		pgnc--;
-		memcpy(vba->clsc + vba->scsz, vba->clsc, vba->brsz * sizeof * vba->clsc);
-
-		if (vba->cr->ncn == 3)
-			ca_next_gen_ncn3_sisd(vba->cr, vba->clsc, vba->clsc + vba->scsz);
-		else
-			ca_next_gen__sisd(vba->cr, vba->clsc, vba->clsc + vba->scsz);
-	}
-	return 0;
-}
-
-void CA_CNITFN_DISABLED(caBitArray* vba, CA_RULE* cr) {
-}
-
-int64_t CA_CNFN_DISABLED(int64_t pgnc, caBitArray* vba) {
-	printf("CM_DISABLED  computation disabled!\n");
-	return 0;
-}
-
+/************************* OpenCL *************************/
 #if ENABLE_CL 
-	static OCLCA oclca = { -1, NULL, NULL, NULL };
+static OCLCA oclca = { -1, NULL, NULL, NULL };
 #endif
 void CA_CNITFN_OPENCL(caBitArray* vba, CA_RULE* cr) {
-	#if ENABLE_CL 
-		if (oclca.success != CL_SUCCESS)
-			oclca = OCLCA_Init("../opencl-vba.cl");
-	#else
-		printf("OpenCL support is not available in this build!\n");
-	#endif
+#if ENABLE_CL 
+	if (oclca.success != CL_SUCCESS)
+		oclca = OCLCA_Init("../opencl-vba.cl");
+#else
+	printf("OpenCL support is not available in this build!\n");
+#endif
 
 	//
 	vba->lc = 256;
@@ -2188,462 +2149,506 @@ void CA_CNITFN_OPENCL(caBitArray* vba, CA_RULE* cr) {
 	initCABitArray(vba, cr);
 }
 
-void CA_CNITFN_OMP_VBA_8x32(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = 8;
-	vba->lw = 32;
-	vba->mmwn = 4;
-	initCABitArray(vba, cr);
+#if ENABLE_CL 
+// **********************************************************************************************************************************
+// OpenCL
+// *********************************************************************************************************************************
+// OCL Declarations *****************************************************************************************************************
+// **********************************************************************************************************************************
+#define OCL_CHECK_ERROR(error) { \
+		if ((error) != CL_SUCCESS) fprintf (stderr, "OpenCL error <%s:%i>: %s\n", __FILE__, __LINE__, ocl_strerr((error))); }
+
+static const char* opencl_error_msgs[] = {
+	"CL_SUCCESS",
+	"CL_DEVICE_NOT_FOUND",
+	"CL_DEVICE_NOT_AVAILABLE",
+	"CL_COMPILER_NOT_AVAILABLE",
+	"CL_MEM_OBJECT_ALLOCATION_FAILURE",
+	"CL_OUT_OF_RESOURCES",
+	"CL_OUT_OF_HOST_MEMORY",
+	"CL_PROFILING_INFO_NOT_AVAILABLE",
+	"CL_MEM_COPY_OVERLAP",
+	"CL_IMAGE_FORMAT_MISMATCH",
+	"CL_IMAGE_FORMAT_NOT_SUPPORTED",
+	"CL_BUILD_PROGRAM_FAILURE",
+	"CL_MAP_FAILURE",
+	"CL_MISALIGNED_SUB_BUFFER_OFFSET",
+	"CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST",
+	/* next IDs start at 30! */
+	"CL_INVALID_VALUE",
+	"CL_INVALID_DEVICE_TYPE",
+	"CL_INVALID_PLATFORM",
+	"CL_INVALID_DEVICE",
+	"CL_INVALID_CONTEXT",
+	"CL_INVALID_QUEUE_PROPERTIES",
+	"CL_INVALID_COMMAND_QUEUE",
+	"CL_INVALID_HOST_PTR",
+	"CL_INVALID_MEM_OBJECT",
+	"CL_INVALID_IMAGE_FORMAT_DESCRIPTOR",
+	"CL_INVALID_IMAGE_SIZE",
+	"CL_INVALID_SAMPLER",
+	"CL_INVALID_BINARY",
+	"CL_INVALID_BUILD_OPTIONS",
+	"CL_INVALID_PROGRAM",
+	"CL_INVALID_PROGRAM_EXECUTABLE",
+	"CL_INVALID_KERNEL_NAME",
+	"CL_INVALID_KERNEL_DEFINITION",
+	"CL_INVALID_KERNEL",
+	"CL_INVALID_ARG_INDEX",
+	"CL_INVALID_ARG_VALUE",
+	"CL_INVALID_ARG_SIZE",
+	"CL_INVALID_KERNEL_ARGS",
+	"CL_INVALID_WORK_DIMENSION",
+	"CL_INVALID_WORK_GROUP_SIZE",
+	"CL_INVALID_WORK_ITEM_SIZE",
+	"CL_INVALID_GLOBAL_OFFSET",
+	"CL_INVALID_EVENT_WAIT_LIST",
+	"CL_INVALID_EVENT",
+	"CL_INVALID_OPERATION",
+	"CL_INVALID_GL_OBJECT",
+	"CL_INVALID_BUFFER_SIZE",
+	"CL_INVALID_MIP_LEVEL",
+	"CL_INVALID_GLOBAL_WORK_SIZE"
+};
+const char*
+ocl_strerr(int error)
+{
+	int index = 0;
+
+	if (error >= -14)
+		index = -error;
+	else if (error <= -30 && error >= -64)
+		index = -error - 15;
+
+	return opencl_error_msgs[index];
 }
 
-void CA_CNITFN_VBA_16x256(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = 1;
-	vba->lw = 256;
-	vba->mmwn = 8;
-	vba->oc = 14;
-	initCABitArray(vba, cr);
-}
 
-void CA_CNITFN_OMP_VBA_8x1x256(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = 2;
-	vba->lw = 512;
-	vba->mmwn = 4;
-	vba->oc = 4;
-	initCABitArray(vba, cr);
-}
+typedef struct OCLCA {
+	cl_int				success;
+	cl_context			context;
+	cl_command_queue	command_queue;
+	cl_kernel			kernel_ca_next_gen;
+	cl_kernel			kernel_ca_next_gen_tot_ncn3;
+	cl_kernel			kernel_ca_next_gen_abs_ncn3_ncs2;
+	cl_kernel			kernel_ca_next_gen_range_tot_ncn3;
+	cl_kernel			kernel_ca_next_gen_vba;
+} OCLCA;
+// **********************************************************************************************************************************
+// OCL Functions ********************************************************************************************************************
+// **********************************************************************************************************************************
+// returns valid opencl kernel object
+#define CL_MAX_PLATFORM_COUNT (4)
+#define CL_MAX_DEVICE_COUNT (4)
+OCLCA
+OCLCA_Init(
+	const char* cl_filename
+) {
+	OCLCA result;
+	result.command_queue = NULL;
+	result.context = NULL;
+	result.kernel_ca_next_gen = NULL;
+	result.kernel_ca_next_gen_tot_ncn3 = NULL;
+	result.kernel_ca_next_gen_abs_ncn3_ncs2 = NULL;
+	result.kernel_ca_next_gen_range_tot_ncn3 = NULL;
+	result.success = CL_SUCCESS;
 
-int64_t CA_CNFN_OMP_VBA_8x1x256(int64_t pgnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+	//return result;
 
-#pragma omp parallel num_threads(2)
+		////////// BEGIN SETUP GPU COMMUNICATION
+
+
+		// Find the first GPU device
+	cl_int cl_errcode_ret;				// used to retrieve opencl error codes
+	cl_device_id selected_device = 0;
+
+	cl_uint platform_count = 0;
+	clGetPlatformIDs(0, NULL, &platform_count);
+	cl_platform_id platform_ids[CL_MAX_PLATFORM_COUNT];
+	clGetPlatformIDs(CL_MAX_PLATFORM_COUNT, platform_ids, &platform_count);
+
+	/* Macros to help display device infos */
+#define OCL_PRINT_DEVICE_INFO_STRING(cl_device_info) { \
+		OCL_CHECK_ERROR(clGetDeviceInfo(device, cl_device_info, sizeof(string1024), &string1024, NULL)); \
+		printf("clGetDeviceInfo %-40s %s\n", #cl_device_info, string1024); }
+#define OCL_PRINT_DEVICE_INFO_UINT(cl_device_info) { \
+		OCL_CHECK_ERROR(clGetDeviceInfo(device, cl_device_info, sizeof(rt_cl_uint), &rt_cl_uint, NULL)); \
+		printf("clGetDeviceInfo %-40s %u\n", #cl_device_info, rt_cl_uint); }
+		/* */
+	char string1024[1024];
+	cl_uint rt_cl_uint;
+	for (int pi = 0; pi < platform_count; pi++) {
+		cl_platform_id platform_id = platform_ids[pi];
+
+		cl_uint device_count = 0;
+		clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, 0, NULL, &device_count);
+		cl_device_id device_ids[CL_MAX_DEVICE_COUNT];
+		clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, CL_MAX_DEVICE_COUNT, device_ids, &device_count);
+
+		fprintf(stderr, "SUC platform found  platform count %d  platform #%d  device count %d  device id #0 %d%d\n",
+			platform_count, pi, device_count, device_ids[0]);
+
+		for (int i = 0; i < device_count; i++) {
+			cl_device_id device = device_ids[i];
+			OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_NAME)
+				OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_VENDOR)
+				OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_VERSION)
+				OCL_PRINT_DEVICE_INFO_STRING(CL_DRIVER_VERSION)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_ADDRESS_BITS)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_MAX_CLOCK_FREQUENCY)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_MAX_COMPUTE_UNITS)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_LONG)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_FLOAT)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_CHAR)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_SHORT)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_INT)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_LONG)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_FLOAT)
+				OCL_PRINT_DEVICE_INFO_UINT(CL_DEVICE_NATIVE_VECTOR_WIDTH_DOUBLE)
+				//OCL_PRINT_DEVICE_INFO_STRING(CL_DEVICE_EXTENSIONS)
+
+				if (pi == 0) {
+					selected_device = device;
+					printf("SELECTED\n");
+				}
+		}
+	}
+
+	if (!selected_device) {
+		fprintf(stderr, "ERR failed to find any OpenCL GPU device. Sorry.\n");
+		result.success = selected_device;
+		return result;
+	}
+
+	// clCreateContext
+	cl_context context = clCreateContext(NULL, 1, &selected_device, NULL, NULL, &cl_errcode_ret);
+	OCL_CHECK_ERROR(cl_errcode_ret);
+	// clCreateCommandQueue
+	cl_command_queue command_queue = clCreateCommandQueue(context, selected_device, 0, &cl_errcode_ret);
+	if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clCreateCommandQueue @0x%x\n", command_queue);
+	else									printf("ERR clCreateCommandQueue failed with error code %d\n", cl_errcode_ret);
+	// clCreateProgramWithSource
+	const char* program_code = read_file(cl_filename);
+	cl_program program = clCreateProgramWithSource(context, 1, (const char* []) { program_code }, NULL, & cl_errcode_ret);
+	if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clCreateProgramWithSource @0x%x\n", program);
+	else									printf("ERR clCreateProgramWithSource failed with error code %d\n", cl_errcode_ret);
+	// clBuildProgram
+	cl_errcode_ret = clBuildProgram(program, 0, NULL, "", NULL, NULL);
+	if (cl_errcode_ret == CL_SUCCESS)		printf("SUC clBuildProgram\n");
+	if (cl_errcode_ret != CL_SUCCESS) {
+		printf("ERR clBuildProgram failed with error code %d\n", cl_errcode_ret);
+		char compiler_log[4096] = "EMPTY\0";
+		clGetProgramBuildInfo(program, selected_device, CL_PROGRAM_BUILD_LOG, sizeof(compiler_log), compiler_log, NULL);
+		printf("    error log\n%s\n", compiler_log);
+		result.success = cl_errcode_ret;
+		return result;
+	}
+	// clCreateKernel
+	////result.kernel_ca_next_gen = clCreateKernel(program, "ca_next_gen", &cl_errcode_ret);
+	////OCL_CHECK_ERROR(cl_errcode_ret)
+	////result.kernel_ca_next_gen_tot_ncn3 = clCreateKernel(program, "ca_next_gen_tot_ncn3", &cl_errcode_ret);
+	////OCL_CHECK_ERROR(cl_errcode_ret)
+	////result.kernel_ca_next_gen_abs_ncn3_ncs2 = clCreateKernel(program, "ca_next_gen_abs_ncn3_ncs2", &cl_errcode_ret);
+	////OCL_CHECK_ERROR(cl_errcode_ret)	
+	////result.kernel_ca_next_gen_range_tot_ncn3 = clCreateKernel(program, "ca_next_gen_range_tot_ncn3", &cl_errcode_ret);
+	////OCL_CHECK_ERROR(cl_errcode_ret)
+	result.kernel_ca_next_gen_vba = clCreateKernel(program, "ca_next_gen_vba", &cl_errcode_ret);
+	OCL_CHECK_ERROR(cl_errcode_ret)
+		// get some kernel info
 	{
-		int ln = omp_get_thread_num();
-		int gnc = pgnc;
-		while (gnc-- > 0) {
-			//
-//#pragma omp barrier
-			//{
-			//	//				CABitArrayPrepareOR(vba, ln * 512, (ln + 1) * 512);
-			//	int bbrw = vba->rw / VBBB;			// bit-blocks per row
-			//	int from = ln * 512 / VBBB;
-			//	int to = (ln + 1) * 512 / VBBB;
-			//	for (int c = from; c < to; ++c) {
-			//		vba->v[(0 + vba->rc) * bbrw + c] = (vba->v[0 * bbrw + c] >> 1) | (vba->v[0 * bbrw + ((c + 1) % bbrw)] << VBPBMM);
-			//		vba->v[(1 + vba->rc) * bbrw + c] = (vba->v[1 * bbrw + c] >> 1) | (vba->v[1 * bbrw + ((c + 1) % bbrw)] << VBPBMM);
-			//	}
-			//	//				printf("SYNC  gnc %d  ln %d\n", gnc, ln);
-			//}
-//#pragma omp barrier
-			//
-			__m256i* vbac;
-			vbac = (__m256i*)vba->v + ln * 2;
-			for (int ri = 0; ri < vba->rc; ++ri) {
-				//				printf("gnc %d  ln %d  ri %d  vbac %p  vbai %p\n", gnc, ln, ri, vbac, (char*)vba->v + vba->sz);
-								// first lane
-				__m256i ymm0 = _mm256_load_si256(vbac + 0);
-				__m256i ymm1 = _mm256_load_si256(vbac + 4);
-				__m256i ymm2 = _mm256_load_si256(vbac + 8);
-				ymm0 = _mm256_or_si256(ymm0, ymm2);
-				ymm0 = _mm256_xor_si256(ymm0, ymm1);
-				_mm256_store_si256(vbac + 0, ymm0);
-				// second lane
-				__m256i ymm3 = _mm256_load_si256(vbac + 1);
-				__m256i ymm4 = _mm256_load_si256(vbac + 5);
-				__m256i ymm5 = _mm256_load_si256(vbac + 9);
-				ymm3 = _mm256_or_si256(ymm3, ymm5);
-				ymm3 = _mm256_xor_si256(ymm3, ymm4);
-				_mm256_store_si256(vbac + 1, ymm3);
-				//
-				vbac += 4;
+		cl_kernel kernel = result.kernel_ca_next_gen_vba;
+		size_t kwgs = 0;
+		OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_WORK_GROUP_SIZE, sizeof(kwgs), &kwgs, NULL));
+		printf("CL_KERNEL_WORK_GROUP_SIZE %u\n", kwgs);
+		size_t pwgsm = 0;
+		OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE, sizeof(pwgsm), &pwgsm, NULL));
+		printf("CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE %u\n", pwgsm);
+		cl_ulong pms = 0;
+		OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_PRIVATE_MEM_SIZE, sizeof(pms), &pms, NULL));
+		printf("CL_KERNEL_PRIVATE_MEM_SIZE %u\n", pms);
+		cl_ulong lms = 0;
+		OCL_CHECK_ERROR(clGetKernelWorkGroupInfo(kernel, NULL, CL_KERNEL_LOCAL_MEM_SIZE, sizeof(lms), &lms, NULL));
+		printf("CL_KERNEL_LOCAL_MEM_SIZE %u\n", pms);
+	}
+	//
+	result.context = context;
+	result.command_queue = command_queue;
+
+	// cleanup
+	//clReleaseProgram(program);
+	//clReleaseCommandQueue(command_queue);
+	//clReleaseContext(context);
+
+	return result;
+}
+//**********************************************************************************************************************************
+/* Calculate next generation OpenCL   flexible variant - can handle totalistic and absolute rules by use of multiplication table */
+void OCLCA_Run(
+	int ng,					// nr of generations
+	int res,				// reset flag, is 1 if anything changes
+	OCLCA oclca,
+	CA_RULE* cr,
+	int sync_memory,
+	const CA_CT* clv,		// cell-line first valid element - this array must include brd > size must ne spsz + brd
+	const int scsz,			// space-size
+	const int brsz,			// border-size
+	cl_uint rg)		// range per kernel
+{
+	rg = max(1, rg);
+
+	cl_int cl_errcode_ret;	// used to retrieve opencl error codes
+
+	// define how many kernels run in parallel
+	cl_uint work_dim = 1;
+	cl_uint gws[1];		// global work size
+	cl_uint lws[1];		// local work size
+
+	///printf("clv %x  scsz %d  gws[0] %u  klrg %u\n", clv, scsz, gws[0], rg);
+
+	// create host to device memory bindings and transfer memory from host to device
+	static cl_mem b_cli = NULL;			// opencl binding for cell-line
+	static cl_mem b_clo = NULL;			// opencl binding for cell-line
+	static cl_mem b_clsz = NULL;			// opencl binding for cell-line-size
+	static cl_mem b_ncn = NULL;			// opencl binding for ncn
+	static cl_mem b_rltl = NULL;			// opencl binding for 
+	static cl_mem b_mntl = NULL;			// opencl binding for
+	static cl_mem b_rg = NULL;			// opencl binding for
+	static int clfp = 0;			// cell-line flip to switch between cli and clo
+	/* Init device memory and host-device-memory-bindings and kernel arguments */
+	if (1 || sync_memory || res || b_cli == NULL) {
+		//printf("opencl_ca memory reset\n");
+		sync_memory = 1;
+		clfp = 1;
+		// clean up
+		if (b_cli != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_cli));
+		if (b_clo != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_clo));
+		if (b_ncn != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_ncn));
+		if (b_rltl != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_rltl));
+		if (b_mntl != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_mntl));
+		if (b_rg != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_rg));
+		// cli
+		b_cli = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, (scsz + brsz) * sizeof(*clv), clv, &cl_errcode_ret);
+		OCL_CHECK_ERROR(cl_errcode_ret);
+		// clo
+		b_clo = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE, (scsz + brsz) * sizeof(*clv), NULL, &cl_errcode_ret);
+		OCL_CHECK_ERROR(cl_errcode_ret);
+		// ncn
+		b_ncn = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->ncn), &cr->ncn, &cl_errcode_ret);
+		OCL_CHECK_ERROR(cl_errcode_ret);
+		// rule-table
+		b_rltl = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->rltl[0]) * cr->nns, &cr->rltl[0], &cl_errcode_ret);
+		OCL_CHECK_ERROR(cl_errcode_ret);
+		// multiplication-table
+		b_mntl = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(cr->mntl[0]) * cr->ncn, &cr->mntl[0], &cl_errcode_ret);
+		OCL_CHECK_ERROR(cl_errcode_ret);
+		// rg
+		b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
+		OCL_CHECK_ERROR(cl_errcode_ret);
+	}
+
+	/* Run kernel */
+	if (0 && cr->tp == TOT && cr->ncn == 3) {
+		int LT = 1;
+		ng = (ng + 1) / LT;
+
+		if (1) {
+			int ws = scsz;// +2 * ng;			// work-size - nr of cells to process
+			int wi = 64;						// item-size in cells
+			int wg = 128;						// group-size in items
+
+			lws[0] = 128;
+			gws[0] = ws / wi / wg * wg;
+			while (gws[0] * wi < ws)
+				gws[0] += wg;
+
+			rg = 0;
+			//ng = 1;
+			clReleaseMemObject(b_rg);
+			b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
+			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clCreateBuffer failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
+
+			printf("ng %d  ws %d  wi %d  wg %d  gws[0] %d gws[0]*wi %d  max ws %d\n", ng, ws, wi, wg, gws[0], gws[0] * wi, scsz + brsz);
+		}
+		else {
+			int ws = scsz + 2 * ng;			// work-size - nr of cells to process
+			int gs = 128;					// group-size in items
+			int gc = 1;						// group-count
+
+			int gn = gs - 2 * LT;			// group-netto - netto amount of items fully processed after acessing gs items
+
+			int gr;							// group-range per group - nr of items one group processes
+
+			// count fixed, range free
+			gr = ws / gc / gs;					// work is distributed among gc groups
+			gr = gr / gn;					// each group processes gs items in parallel
+			while (gr * gn * gc * gs < ws)		// make sure at least ndss items are processed
+				++gr;
+
+			// range fixed, count free
+			//gr = 1;
+			//gc = ws / gn;
+			//while (gr * gn * gc < ws)		// make sure at least ndss items are processed
+			//	++gc;
+
+
+			static int dc = 0;
+			if (1 | ++dc == 100) {
+				dc = 0;
+				printf("ng %d  ws %d  gc %d  gs %d  gn %d  gr %d  gr*gn*gc %d  max ws %d\n", ng, ws, gc, gs, gn, gr, gr * gn * gc, scsz + brsz);
 			}
-		}
-	}
-
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return 0;
-}
-
-#define NMTS 8			// number of threads
-void CA_CNITFN_OMP_TEST(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = NMTS;
-	vba->lw = 256;
-	vba->mmwn = 4;
-	initCABitArray(vba, cr);
-}
-
-/*
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-	while (gnc > 0) {
-		gnc--;
-		CABitArrayPrepareOR(vba, 0, 0);
-		__m256i* vbac = (__m256i*)vba->v;
-		int rc = vba->rc;
-		register __m256i ymm0;
-		for (int ri = 0; ri < rc; ++ri) {
-			ymm0 = _mm256_or_si256(_mm256_load_si256(vbac + ri), _mm256_load_si256(vbac + ri + 2));
-			ymm0 = _mm256_xor_si256(ymm0, _mm256_load_si256(vbac + ri + 1));
-			_mm256_store_si256(vbac + ri, ymm0);
-		}
-	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return gnc;
-*/
-
-/*
-
-from, to		in bits, must be multiple of size of ba->v type (currently 32)
-
-__inline
-void
-CABitArrayPrepareOR(caBitArray* ba, int from, int to) {
-	int bbrw = ba->rw / VBBB;			// bit-blocks per row
-	if (to == 0)
-		to = bbrw;
-	else
-		to = to / VBBB;
-	for (int r = 0; r < ba->oc; ++r) {
-		for (int c = from / VBBB; c < to; ++c) {
-			ba->v[(r + ba->rc) * bbrw + c] =
-				(ba->v[r * bbrw + c] >> 1) | (ba->v[r * bbrw + ((c + 1) % bbrw)] << VBPBMM);
-			//			printf("VB OR  bbrw %d  x %d  x+1 %d %d\n", bbrw, c, (c + 1) & (bbrw - 1), ((c + 1) % bbrw));
-		}
-	}
-}*/
-
-int64_t CA_CNFN_OMP_TEST(int64_t pgnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-CABitArrayPrepareOR(vba, 0, 0);
-
-int rc = vba->rc;			// row-count
-int oc = vba->oc;			// overflow-count
-int bbrw = vba->rw / VBBB;			// bit-blocks per row
-
-	__m256i* vm256i = (__m256i*)vba->v;										// first valid element / array-pointer to bit array
-	omp_set_num_threads(NMTS);
-//printf("num thread 5D\n", );
-
-	__m256i ymm0, ymm1, ymm2;
-
-	#pragma omp parallel default(none) private(ymm0, ymm1, ymm2) shared(bbrw, vba, oc, rc, vm256i, pgnc)
-	{
-		int64_t gnc = pgnc;
-		int tdnm = omp_get_thread_num();		// thread-number
-		__m256i* vbac = vm256i + tdnm;
-
-
-		while (gnc > 0) {
-			gnc--;
-			//#pragma omp master
-			//{
-			//	CABitArrayPrepareOR(vba, 0, 0);
-			//}
-
-			//#pragma omp barrier
-			//for (int r = 0; r < oc; ++r) {
-			//	for (int c = 256 * tdnm / VBBB; c < 256 * (tdnm + 1) / VBBB; ++c) {
-			//		vba->v[(r + vba->rc) * bbrw + c] =
-			//			(vba->v[r * bbrw + c] >> 1) | (vba->v[r * bbrw + ((c + 1) % bbrw)] << VBPBMM);
-			//	}
-			//}
-			#pragma omp barrier
-
-//#pragma omp parallel
-			for (int ri = 0; ri < rc; ++ri) {
-///printf_s("Thread %d  gnc %lld  %p  %p\n", omp_get_thread_num(), gnc, vbac + (ri + 0) * NMTS, vbac + (ri + 1) * NMTS);
-//printf_s("Thread %d  bb %d  gnc %lld\n", omp_get_thread_num(), tdnm + ri * NMTS, gnc);
-				ymm0 = _mm256_load_si256(vbac + NMTS * (ri + 0));
-				ymm1 = _mm256_load_si256(vbac + NMTS * (ri + 1));
-				ymm2 = _mm256_load_si256(vbac + NMTS * (ri + 2));
-				ymm0 = _mm256_or_si256(ymm0, ymm2);
-				ymm0 = _mm256_xor_si256(ymm0, ymm1);
-				_mm256_store_si256(vbac + ri * NMTS, ymm0);
+			if (gr * gn * gc * 16 > scsz + brsz) {
+				printf("!!!! working size to big / border to small\n");
+				gr = 0;
 			}
+
+			rg = gr;
+			clReleaseMemObject(b_rg);
+			b_rg = clCreateBuffer(oclca.context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(rg), &rg, &cl_errcode_ret);
+			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clCreateBuffer failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
+
+			// kernel ca_next_gen_tot_ncn3
+			///lws[0] = 128;
+			lws[0] = gs;
+			//gws[0] = (scsz + brsz - cr->ncn + 1 - 512 /* LT */) / rg;
+			///gws[0] = ((scsz + brsz - cr->ncn + 1) / rg + 1) / 128 * 128;
+			//gws[0] = scsz / rg + 1;
+			gws[0] = gc * gs;
+		}
+		///printf("gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
+		// set constant kernel arguments
+		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, 2, sizeof(b_rltl), &b_rltl);
+		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
+		cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, 3, sizeof(b_rg), &b_rg);
+		if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
+		// run kernel rt times
+		for (int rt = 0; rt < ng; ++rt) {
+			// advance clfp
+			if (++clfp == 2) clfp = 0;
+			///printf("clfp %d\n", clfp);
+			// set variable kernel arguments
+			cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, clfp == 1, sizeof(b_cli), &b_cli);
+			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg failed with error code  %d.\n", cl_errcode_ret);
+			cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_range_tot_ncn3, clfp == 0, sizeof(b_clo), &b_clo);
+			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg failed with error code  %d.\n", cl_errcode_ret);
+			// run kernel
+			cl_errcode_ret = clEnqueueNDRangeKernel(oclca.command_queue, oclca.kernel_ca_next_gen_range_tot_ncn3, work_dim, NULL, &gws, &lws, 0, NULL, NULL);
+			if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clEnqueueNDRangeKernel for kenrel 'ca_next_gen_tot_ncn3' failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
+			//else									printf("SUC clEnqueueNDRangeKernel for kenrel 'ca_next_gen_tot_ncn3' near line %d.\n", __LINE__);
 		}
 	}
+	// SIMPLE KERNEL
+	else {
+		/* Make sure kernrel is available */
+		//if (oclca.kernel_ca_next_gen == NULL || oclca.kernel_ca_next_gen_tot_ncn3 == NULL)
+		//	return 0;
 
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	
-	return 0;
-}
+		cl_kernel kernel = oclca.kernel_ca_next_gen_tot_ncn3;
+		if (cr->ncn == 3 && cr->ncs == 2)
+			kernel = oclca.kernel_ca_next_gen_abs_ncn3_ncs2;
+		int mnsz = (scsz + ng * (cr->ncn - 1));	// minimum size needed to process
+		int mxsz = scsz + brsz;	// maximum size
+		lws[0] = 1024;
+		gws[0] = mnsz / lws[0] * lws[0];
+		while (gws[0] < mnsz)
+			gws[0] += lws[0];
+		//		printf("smpl krnl  ng %6d  gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", ng, gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
 
-int64_t CA_CNFN_VBA_16x256(int64_t pgnc, caBitArray* vba) {
-	// WORK IN PROGRESS
-	/* Idea is to use all 16 AVX regsiters */
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-	while (pgnc > 0) {
-		pgnc -= 4;
-		CABitArrayPrepareOR(vba, 0, 0);
-
-		register __m256i ymm0, ymm1, ymm2, ymm3, ymm4, ymm5, ymm6, ymm7;
-		register __m256i ymm8, ymm9;
-		register __m256i ymm10, ymm11, ymm12, ymm13, ymm14, ymm15;
-
-		for (int ri = 0; ri < vba->rc; ri += 8) {
-			__m256i* vbac = (__m256i*)vba->v + ri;
-
-			ymm0 = _mm256_load_si256(vbac + 0);
-			ymm1 = _mm256_load_si256(vbac + 1);
-			ymm2 = _mm256_load_si256(vbac + 2);
-			ymm3 = _mm256_load_si256(vbac + 3);
-			ymm4 = _mm256_load_si256(vbac + 4);
-			ymm5 = _mm256_load_si256(vbac + 5);
-			ymm6 = _mm256_load_si256(vbac + 6);
-			ymm7 = _mm256_load_si256(vbac + 7);
-			ymm8 = _mm256_load_si256(vbac + 8);
-			ymm9 = _mm256_load_si256(vbac + 9);
-			ymm10 = _mm256_load_si256(vbac + 10);
-			ymm11 = _mm256_load_si256(vbac + 11);
-			ymm12 = _mm256_load_si256(vbac + 12);
-			ymm13 = _mm256_load_si256(vbac + 13);
-			ymm14 = _mm256_load_si256(vbac + 14);
-			ymm15 = _mm256_load_si256(vbac + 15);
-
-			ymm0 = _mm256_or_si256(ymm0, ymm2);		 ymm0 = _mm256_xor_si256(ymm0, ymm1);
-			ymm1 = _mm256_or_si256(ymm1, ymm3);		 ymm1 = _mm256_xor_si256(ymm1, ymm2);
-			ymm2 = _mm256_or_si256(ymm2, ymm4);		 ymm2 = _mm256_xor_si256(ymm2, ymm3);
-			ymm3 = _mm256_or_si256(ymm3, ymm5);		 ymm3 = _mm256_xor_si256(ymm3, ymm4);
-			ymm4 = _mm256_or_si256(ymm4, ymm6);		 ymm4 = _mm256_xor_si256(ymm4, ymm5);
-			ymm5 = _mm256_or_si256(ymm5, ymm7);		 ymm5 = _mm256_xor_si256(ymm5, ymm6);
-			ymm6 = _mm256_or_si256(ymm6, ymm8);		 ymm6 = _mm256_xor_si256(ymm6, ymm7);
-			ymm7 = _mm256_or_si256(ymm7, ymm9);		 ymm7 = _mm256_xor_si256(ymm7, ymm8);
-			ymm8 = _mm256_or_si256(ymm8, ymm10);		 ymm8 = _mm256_xor_si256(ymm8, ymm9);
-			ymm9 = _mm256_or_si256(ymm9, ymm11);		 ymm9 = _mm256_xor_si256(ymm9, ymm10);
-			ymm10 = _mm256_or_si256(ymm10, ymm12);		ymm10 = _mm256_xor_si256(ymm10, ymm11);
-			ymm11 = _mm256_or_si256(ymm11, ymm13);		ymm11 = _mm256_xor_si256(ymm11, ymm12);
-			ymm12 = _mm256_or_si256(ymm12, ymm14);		ymm12 = _mm256_xor_si256(ymm12, ymm13);
-			ymm13 = _mm256_or_si256(ymm13, ymm15);		ymm13 = _mm256_xor_si256(ymm13, ymm14);
-
-			ymm0 = _mm256_or_si256(ymm0, ymm2);		 ymm0 = _mm256_xor_si256(ymm0, ymm1);
-			ymm1 = _mm256_or_si256(ymm1, ymm3);		 ymm1 = _mm256_xor_si256(ymm1, ymm2);
-			ymm2 = _mm256_or_si256(ymm2, ymm4);		 ymm2 = _mm256_xor_si256(ymm2, ymm3);
-			ymm3 = _mm256_or_si256(ymm3, ymm5);		 ymm3 = _mm256_xor_si256(ymm3, ymm4);
-			ymm4 = _mm256_or_si256(ymm4, ymm6);		 ymm4 = _mm256_xor_si256(ymm4, ymm5);
-			ymm5 = _mm256_or_si256(ymm5, ymm7);		 ymm5 = _mm256_xor_si256(ymm5, ymm6);
-			ymm6 = _mm256_or_si256(ymm6, ymm8);		 ymm6 = _mm256_xor_si256(ymm6, ymm7);
-			ymm7 = _mm256_or_si256(ymm7, ymm9);		 ymm7 = _mm256_xor_si256(ymm7, ymm8);
-			ymm8 = _mm256_or_si256(ymm8, ymm10);		 ymm8 = _mm256_xor_si256(ymm8, ymm9);
-			ymm9 = _mm256_or_si256(ymm9, ymm11);		 ymm9 = _mm256_xor_si256(ymm9, ymm10);
-			ymm10 = _mm256_or_si256(ymm10, ymm12);		ymm10 = _mm256_xor_si256(ymm10, ymm11);
-			ymm11 = _mm256_or_si256(ymm11, ymm13);		ymm11 = _mm256_xor_si256(ymm11, ymm12);
-
-			ymm0 = _mm256_or_si256(ymm0, ymm2);		 ymm0 = _mm256_xor_si256(ymm0, ymm1);
-			ymm1 = _mm256_or_si256(ymm1, ymm3);		 ymm1 = _mm256_xor_si256(ymm1, ymm2);
-			ymm2 = _mm256_or_si256(ymm2, ymm4);		 ymm2 = _mm256_xor_si256(ymm2, ymm3);
-			ymm3 = _mm256_or_si256(ymm3, ymm5);		 ymm3 = _mm256_xor_si256(ymm3, ymm4);
-			ymm4 = _mm256_or_si256(ymm4, ymm6);		 ymm4 = _mm256_xor_si256(ymm4, ymm5);
-			ymm5 = _mm256_or_si256(ymm5, ymm7);		 ymm5 = _mm256_xor_si256(ymm5, ymm6);
-			ymm6 = _mm256_or_si256(ymm6, ymm8);		 ymm6 = _mm256_xor_si256(ymm6, ymm7);
-			ymm7 = _mm256_or_si256(ymm7, ymm9);		 ymm7 = _mm256_xor_si256(ymm7, ymm8);
-			ymm8 = _mm256_or_si256(ymm8, ymm10);		 ymm8 = _mm256_xor_si256(ymm8, ymm9);
-			ymm9 = _mm256_or_si256(ymm9, ymm11);		 ymm9 = _mm256_xor_si256(ymm9, ymm10);
-
-			ymm0 = _mm256_or_si256(ymm0, ymm2);		 ymm0 = _mm256_xor_si256(ymm0, ymm1);
-			ymm1 = _mm256_or_si256(ymm1, ymm3);		 ymm1 = _mm256_xor_si256(ymm1, ymm2);
-			ymm2 = _mm256_or_si256(ymm2, ymm4);		 ymm2 = _mm256_xor_si256(ymm2, ymm3);
-			ymm3 = _mm256_or_si256(ymm3, ymm5);		 ymm3 = _mm256_xor_si256(ymm3, ymm4);
-			ymm4 = _mm256_or_si256(ymm4, ymm6);		 ymm4 = _mm256_xor_si256(ymm4, ymm5);
-			ymm5 = _mm256_or_si256(ymm5, ymm7);		 ymm5 = _mm256_xor_si256(ymm5, ymm6);
-			ymm6 = _mm256_or_si256(ymm6, ymm8);		 ymm6 = _mm256_xor_si256(ymm6, ymm7);
-			ymm7 = _mm256_or_si256(ymm7, ymm9);		 ymm7 = _mm256_xor_si256(ymm7, ymm8);
-
-			_mm256_store_si256(vbac + 0, ymm0);
-			_mm256_store_si256(vbac + 1, ymm1);
-			_mm256_store_si256(vbac + 2, ymm2);
-			_mm256_store_si256(vbac + 3, ymm3);
-			_mm256_store_si256(vbac + 4, ymm4);
-			_mm256_store_si256(vbac + 5, ymm5);
-			_mm256_store_si256(vbac + 6, ymm6);
-			_mm256_store_si256(vbac + 7, ymm7);
-		}
-	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return 0;
-}
-
-
-void CA_CNITFN_VBA_2x256(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = 2;
-	vba->lw = 256;
-	vba->mmwn = 8;
-	vba->oc = 2;
-	initCABitArray(vba, cr);
-}
-
-void CA_CNITFN_VBA_1x32(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = 1;
-	vba->lw = 32;
-	vba->mmwn = 64;
-	initCABitArray(vba, cr);
-}
-
-void CA_CNITFN_VBA_1x64(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = 1;
-	vba->lw = 64;
-	vba->mmwn = 32;
-	initCABitArray(vba, cr);
-}
-
-void CA_CNITFN_VBA_2x32(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = 2;
-	vba->lw = 32;
-	vba->mmwn = 32;
-	initCABitArray(vba, cr);
-}
-
-void CA_CNITFN_VBA_4x32(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = 4;
-	vba->lw = 32;
-	vba->mmwn = 16;
-	initCABitArray(vba, cr);
-}
-
-void CA_CNITFN_VBA_1x256(caBitArray* vba, CA_RULE* cr) {
-	vba->lc = 1;
-	vba->lw = 256;
-	vba->mmwn = 32;
-	initCABitArray(vba, cr);
-}
-
-int64_t CA_CNFN_VBA_1x32(int64_t pgnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
-
-		UINT32* vbac = (UINT32*)vba->v;
-		for (int ri = 0; ri < vba->rc; ++ri) {
-			vbac[ri] = vbac[ri + 1] ^ (vbac[ri] | vbac[ri + 2]);				// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
+		if (gws[0] > mxsz) {
+			printf("space size insufficient! aborting.\n");
+			printf("smpl krnl  ng %6d  gws %d    rg %d  gws*rg %d   scsz %d  brsz %d  sc+br %d\n", ng, gws[0], rg, gws[0] * rg, scsz, brsz, scsz + brsz);
+			return;
 		}
 
-		pgnc--;
-	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return 0;
-}
-
-int64_t CA_CNFN_VBA_2x32(int64_t pgnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
-
-		UINT32* vbac = (UINT32*)vba->v;
-		for (int ri = 0; ri < vba->rc * 2; ri += 2) {
-			vbac[ri + 0] = vbac[ri + 2] ^ (vbac[ri + 0] | vbac[ri + 4]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
-			vbac[ri + 1] = vbac[ri + 3] ^ (vbac[ri + 1] | vbac[ri + 5]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
-		}
-
-		pgnc--;
-	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return 0;
-}
-
-int64_t CA_CNFN_VBA_4x32(int64_t pgnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
-
-		UINT32* vbac = (UINT32*)vba->v;
-		for (int ri = 0; ri < vba->rc * 4; ri += 4) {
-			vbac[ri + 0] = vbac[ri + 4] ^ (vbac[ri + 0] | vbac[ri + 8]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
-			vbac[ri + 1] = vbac[ri + 5] ^ (vbac[ri + 1] | vbac[ri + 9]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
-			vbac[ri + 2] = vbac[ri + 6] ^ (vbac[ri + 2] | vbac[ri + 10]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
-			vbac[ri + 3] = vbac[ri + 7] ^ (vbac[ri + 3] | vbac[ri + 11]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
-		}
-
-		pgnc--;
-	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return 0;
-}
-
-int64_t CA_CNFN_OMP_VBA_8x32(int64_t pgnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
-
-		int ln;// , ri;
-		int c = 0;
-#pragma omp parallel for //private (vbac, ln, ri)
-		for (ln = 0; ln < 8; ln++) {
-			UINT32* vbac;
-			vbac = (UINT32*)vba->v + ln;
-			for (int ri = 0; ri < vba->rc * 8; ri += 8) {
-				++c;
-				vbac[ri] = vbac[ri + 8] ^ (vbac[ri] | vbac[ri + 16]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
-			}
-		}
-		//printf("c %d\n", c);
-
-		pgnc--;
-	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return 0;
-}
-
-int64_t CA_CNFN_VBA_1x64(int64_t pgnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
-
-		UINT64* vbac = (UINT64*)vba->v;
-		for (int ri = 0; ri < vba->rc; ++ri) {
-			vbac[ri] = vbac[ri + 1] ^ (vbac[ri] | vbac[ri + 2]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
-		}
-
-		pgnc--;
-	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return 0;
-}
-
-int64_t CA_CNFN_VBA_1x256(int64_t gnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-	while (gnc > 0) {
-		gnc--;
-		CABitArrayPrepareOR(vba, 0, 0);
-		__m256i* vbac = (__m256i*)vba->v;
-		int rc = vba->rc;
-		register __m256i ymm0;
-		for (int ri = 0; ri < rc; ++ri) {
-			ymm0 = _mm256_or_si256(_mm256_load_si256(vbac + ri), _mm256_load_si256(vbac + ri + 2));
-			ymm0 = _mm256_xor_si256(ymm0, _mm256_load_si256(vbac + ri + 1));
-			_mm256_store_si256(vbac + ri, ymm0);
-			// works, but seems to be slower
-			//*((__m256i*)vba->v + ri) = _mm256_or_si256(*((__m256i*)vba->v + ri), *((__m256i*)vba->v + ri + 2));
-			//*((__m256i*)vba->v + ri) = _mm256_xor_si256(*((__m256i*)vba->v + ri), *((__m256i*)vba->v + ri + 1));
+		//
+		// set constant kernel arguments
+		///OCL_CHECK_ERROR(clSetKernelArg(kernel, 2, sizeof(b_ncn), &b_ncn));
+		OCL_CHECK_ERROR(clSetKernelArg(kernel, 2, sizeof(b_rltl), &b_rltl));
+		///OCL_CHECK_ERROR(clSetKernelArg(kernel, 4, sizeof(b_mntl), &b_mntl));
+		// run kernel rt times
+		for (int rt = 0; rt < ng; ++rt) {
+			// advance clfp
+			if (++clfp == 2) clfp = 0;
+			// set variable kernel arguments
+			OCL_CHECK_ERROR(clSetKernelArg(kernel, clfp == 1, sizeof(b_cli), &b_cli));
+			OCL_CHECK_ERROR(clSetKernelArg(kernel, clfp == 0, sizeof(b_clo), &b_clo));
+			// run kernel
+			OCL_CHECK_ERROR(clEnqueueNDRangeKernel(oclca.command_queue, kernel, work_dim, NULL, &gws, &lws, 0, NULL, NULL));
 		}
 	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return gnc;
-}
+	/* Transfer device memory to host memory */
+	if (sync_memory) {
+		//if (1) {// && sync_memory && b_clo != NULL) {
+		cl_mem b_cl;
+		if (clfp == 0)	b_cl = b_clo;
+		else			b_cl = b_cli;
+		OCL_CHECK_ERROR(clEnqueueReadBuffer(oclca.command_queue, b_cl, CL_TRUE, 0, scsz * sizeof(*clv), clv, NULL, 0, NULL));
 
-int64_t CA_CNFN_VBA_2x256(int64_t pgnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
-
-		__m256i* vbac = (__m256i*)vba->v;
-		for (int ri = 0; ri < vba->rc * 2; ri += 2) {
-			// first lane
-			__m256i ymm0 = _mm256_load_si256(vbac + ri + 0);
-			__m256i ymm1 = _mm256_load_si256(vbac + ri + 2);
-			__m256i ymm2 = _mm256_load_si256(vbac + ri + 4);
-			ymm0 = _mm256_or_si256(ymm0, ymm2);
-			ymm0 = _mm256_xor_si256(ymm0, ymm1);
-			_mm256_store_si256(vbac + ri + 0, ymm0);
-			// second lane
-			__m256i ymm3 = _mm256_load_si256(vbac + ri + 1);
-			__m256i ymm4 = _mm256_load_si256(vbac + ri + 3);
-			__m256i ymm5 = _mm256_load_si256(vbac + ri + 5);
-			ymm3 = _mm256_or_si256(ymm3, ymm5);
-			ymm3 = _mm256_xor_si256(ymm3, ymm4);
-			_mm256_store_si256(vbac + ri + 1, ymm3);
-		}
-
-		pgnc--;
+		//clEnqueueMapBuffer(oclca.command_queue, b_cl, CL_TRUE, CL_MAP_READ, 0, (scsz + brsz) * sizeof(*clv), 0, NULL, NULL, &cl_errcode_ret);
+		//if (cl_errcode_ret != CL_SUCCESS)			printf("ERR clEnqueueMapBuffer failed with error code %d\n", cl_errcode_ret);
+		////	///memcpy(DeMa, result, DMS * sizeof(*DeMa));
+		//clEnqueueUnmapMemObject(oclca.command_queue, b_cl, 0, 0, NULL, NULL);
 	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return 0;
 }
+
+
+// **********************************************************************************************************************************
+/* Calculate next generation OpenCL   flexible variant - can handle totalistic and absolute rules by use of multiplication table */
+void OCLCA_RunVBA(
+	int gnc,										// nr of generations
+	int res,									// reset flag, is 1 if anything changes
+	OCLCA oclca,
+	CA_RULE* cr,
+	caBitArray vba,
+	int sync_memory,
+	cl_uint rg)									// range per kernel
+{
+	rg = max(1, rg);
+
+	cl_int cl_errcode_ret;						// used to retrieve opencl error codes
+
+	// create host to device memory bindings and transfer memory from host to device
+	static cl_mem b_vba = NULL;					// opencl binding for vertical-bit-array
+	/* Init device memory and host-device-memory-bindings and kernel arguments */
+	if (1 || sync_memory || res || b_vba == NULL) {
+		//printf("opencl_ca memory reset\n");
+		sync_memory = 1;
+		// clean up
+		if (b_vba != NULL)	OCL_CHECK_ERROR(clReleaseMemObject(b_vba));
+		// vba
+		b_vba = clCreateBuffer(oclca.context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, vba.ct / 8 + vba.oc * vba.rw / 8, vba.v, &cl_errcode_ret);
+		OCL_CHECK_ERROR(cl_errcode_ret);
+	}
+
+	/* Run kernel */
+	// define how many kernels run in parallel
+	size_t global = vba.lc;								// global work size
+	///printf("gws %d  rg %d  rc %d  lc %d\n", gws[0], rg, vba.lc, vba.rc);
+		// set kernel arguments
+	cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 0, sizeof(b_vba), &b_vba);
+	if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #0 failed with error code  %d.\n", cl_errcode_ret);
+	cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 1, sizeof(gnc), &gnc);
+	if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #2 failed with error code  %d.\n", cl_errcode_ret);
+	cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 2, sizeof(vba.rc), &vba.rc);
+	if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #1 failed with error code  %d.\n", cl_errcode_ret);
+	cl_errcode_ret = clSetKernelArg(oclca.kernel_ca_next_gen_vba, 3, sizeof(vba.lc), &vba.lc);
+	if (cl_errcode_ret != CL_SUCCESS)		printf("ERR kernel set arg #3 failed with error code  %d.\n", cl_errcode_ret);
+	// run kernel
+	cl_errcode_ret = clEnqueueNDRangeKernel(oclca.command_queue, oclca.kernel_ca_next_gen_vba, 1, NULL, &global, NULL, 0, NULL, NULL);
+	if (cl_errcode_ret != CL_SUCCESS)		printf("ERR clEnqueueNDRangeKernel for kenrel 'ca_next_gen_vba' failed with error code %d near line %d.\n", cl_errcode_ret, __LINE__);
+	//
+	clFinish(oclca.command_queue);
+	/* Transfer device memory back to host memory */
+	if (sync_memory) {
+		printf("vba.ct %d\n", vba.ct);
+		OCL_CHECK_ERROR(clEnqueueReadBuffer(oclca.command_queue, b_vba, CL_TRUE, 0, vba.ct / 8, vba.v, 0, NULL, NULL));
+	}
+}
+// **********************************************************************************************************************************
+#endif
 
 int64_t CA_CNFN_OPENCL(int64_t pgnc, caBitArray* vba) {
 	#if ENABLE_CL 
