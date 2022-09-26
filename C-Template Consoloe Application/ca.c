@@ -100,7 +100,7 @@ const CA_RULE CA_RULE_EMPTY = { 0, 0, 0, 0, 0, 0, 0, 0 };
 /* Bit-array */
 #define VBBT UINT32									// vertical-bit-block-type - datatype used to do operations (esp. bit manipulation) on vertical-bit-array
 #define VBBTBTCTPT 5								// vertical-bit-block-type-bit-count as power of 2
-#define VBBTBTCTMM ((1 << VBBTBTCTPT) - 1)			// vertical-bit-block-type-bit-count-mod-mask - is equivalent to X % vertical-bit-block-type-bit-count (must be power of 2)
+#define VBBTBTCTMM ((1<<VBBTBTCTPT) - 1)			// vertical-bit-block-type-bit-count-mod-mask - is equivalent to X % vertical-bit-block-type-bit-count (must be power of 2)
 #define FBPT UINT16									// full-bit-block c-data-type
 #define HBPT UINT8									// half-bit-block c-data-type
 #define BPB 16										// bits per block, i.e. bits per elemet in bta 
@@ -138,7 +138,7 @@ UINT64 ipow(UINT64 base, int exp) {
 __inline
 int32_t log2fix(uint32_t x, size_t precision)
 {
-	int32_t b = 1U << (precision - 1);
+	int32_t b = 1U<<(precision - 1);
 	int32_t y = 0;
 
 	if (precision < 1 || precision > 31) {
@@ -149,21 +149,21 @@ int32_t log2fix(uint32_t x, size_t precision)
 		return INT32_MIN; // represents negative infinity
 	}
 
-	while (x < 1U << precision) {
+	while (x < 1U<<precision) {
 		x <<= 1;
-		y -= 1U << precision;
+		y -= 1U<<precision;
 	}
 
-	while (x >= 2U << precision) {
+	while (x >= 2U<<precision) {
 		x >>= 1;
-		y += 1U << precision;
+		y += 1U<<precision;
 	}
 
 	uint64_t z = x;
 
 	for (size_t i = 0; i < precision; i++) {
-		z = (z * z) >> precision;
-		if (z >= 2U << (uint64_t)precision) {
+		z = (z * z)>>precision;
+		if (z >= 2U<<(uint64_t)precision) {
 			z >>= 1;
 			y += b;
 		}
@@ -212,7 +212,7 @@ fnv_32_buf(void* buf, size_t len, UINT32 hval)
 #if defined(NO_FNV_GCC_OPTIMIZATION)
 		hval *= FNV_32_PRIME;
 #else
-		hval += (hval << 1) + (hval << 4) + (hval << 7) + (hval << 8) + (hval << 24);
+		hval += (hval<<1) + (hval<<4) + (hval<<7) + (hval<<8) + (hval<<24);
 #endif
 
 		/* xor the bottom with the current octet */
@@ -229,7 +229,7 @@ fnv_16_buf(void* buf, size_t len)
 #define MASK_16 (((UINT32)1<<16)-1) /* i.e., (u_int32_t)0xffff */
 	UINT32 hash;
 	hash = fnv_32_buf(buf, len, FNV1_32_INIT);
-	hash = (hash >> 16) ^ (hash & MASK_16);
+	hash = (hash>>16) ^ (hash & MASK_16);
 	return (UINT16)hash;
 }
 
@@ -336,7 +336,7 @@ void print_bitblock_bits(FBPT* fbp, size_t num_elements, int elpr) {
 			++rn;
 		}
 		for (int ib = 0; ib < BPB; ++ib) {
-			printf("%c", (1 & (fbp[i] >> ib)) ? '1' : '0');
+			printf("%c", (1 & (fbp[i]>>ib)) ? '1' : '0');
 			if (ib && (ib + 1) % 8 == 0)
 				printf(".");
 		}
@@ -347,7 +347,7 @@ void print_bitblock_bits(FBPT* fbp, size_t num_elements, int elpr) {
 
 void print_byte_as_bits(char val) {
 	for (int i = 0; i < 8; i++) {
-		printf("%c", (val & (1 << i)) ? '1' : '0');
+		printf("%c", (val & (1<<i)) ? '1' : '0');
 	}
 }
 
@@ -373,13 +373,13 @@ void
 CABitArrayPrepareOR(caBitArray* ba, int from, int to) {
 	int bbrwpt = ba->rwpt - VBBTBTCTPT;			// bit-blocks per row as power of two
 	if (to == 0)
-		to = 1 << bbrwpt;
+		to = 1<<bbrwpt;
 	else
 		to >>= VBBTBTCTPT;
 	for (int r = 0; r < ba->oc; ++r) {
-		for (int c = from >> VBBTBTCTPT; c < to; ++c) {
-			ba->v[((r + ba->rc) << bbrwpt) + c] =
-				(ba->v[(r << bbrwpt) + c] >> 1) | (ba->v[(r << bbrwpt) + ((c + 1) & ((1 << bbrwpt) - 1))] << VBBTBTCTMM);
+		for (int c = from>>VBBTBTCTPT; c < to; ++c) {
+			ba->v[((r + ba->rc)<<bbrwpt) + c] =
+				(ba->v[(r<<bbrwpt) + c]>>1) | (ba->v[(r<<bbrwpt) + ((c + 1) & ((1<<bbrwpt) - 1))]<<VBBTBTCTMM);
 						//printf("VB OR  bbrw %d  x %d  x+1 %d %d\n", bbrw, c, (c + 1) & (bbrw - 1), ((c + 1) % bbrw));
 		}
 	}
@@ -393,15 +393,15 @@ initCABitArray(caBitArray* ba, CA_RULE* rl) {
 	ba->lwpt = max(3, ba->lwpt);
 	ba->lcpt = max(0, ba->lcpt);
 	ba->rwpt = ba->lwpt + ba->lcpt;
-	ba->rc = max(1, (ba->ct + (1 << ba->rwpt) - 1) / (1 << ba->rwpt));						// calculate row-count by dividing ct by rw rounding up
-	ba->rc = ((ba->rc + (1 << ba->mmwnpt) - 1) / (1 << ba->mmwnpt)) * (1 << ba->mmwnpt);				// align row-count with memory-window
-	ba->ct = ba->rc << ba->rwpt;
+	ba->rc = max(1, (ba->ct + (1<<ba->rwpt) - 1) / (1<<ba->rwpt));						// calculate row-count by dividing ct by rw rounding up
+	ba->rc = ((ba->rc + (1<<ba->mmwnpt) - 1) / (1<<ba->mmwnpt)) * (1<<ba->mmwnpt);				// align row-count with memory-window
+	ba->ct = ba->rc<<ba->rwpt;
 	if (ba->oc == 0)
 		ba->oc = rl->ncn - 1;
-	ba->sz = (ba->ct + (ba->oc << ba->rwpt)) >> 3;
+	ba->sz = (ba->ct + (ba->oc<<ba->rwpt))>>3;
 	_aligned_free(ba->v);							// aligned memory management may be necesary for use of some intrinsic or opencl functions
 	ba->v = _aligned_malloc(ba->sz, BYAL);
-	printf("initCABitArray   end    ct %d  rc %d  oc %d  rw 2^%d (%d)  lc 2^%d  lw 2^%d  mmwn 2^%d (%d)  sz %d  v %p\n", ba->ct, ba->rc, ba->oc, ba->rwpt, 1 << ba->rwpt, ba->lcpt, ba->lwpt, ba->mmwnpt, (1 << ba->mmwnpt), ba->sz, ba->v);
+	printf("initCABitArray   end    ct %d  rc %d  oc %d  rw 2^%d (%d)  lc 2^%d  lw 2^%d  mmwn 2^%d (%d)  sz %d  v %p\n", ba->ct, ba->rc, ba->oc, ba->rwpt, 1<<ba->rwpt, ba->lcpt, ba->lwpt, ba->mmwnpt, (1<<ba->mmwnpt), ba->sz, ba->v);
 }
 
 /* 
@@ -417,24 +417,24 @@ convertBetweenCACTandCABitArray(CA_CT* csv, CA_CT* csi, caBitArray* ba, int dr) 
 
 	int dcl = 0;											// vertical-bit-array-destination-column
 	int drw = 0;											// vertical-bit-array-destination-row
-	unsigned int bacsp = 1 << (ba->rwpt - VBBTBTCTPT);		// vertical-bit-array-cursor-step (in bytes)
+	unsigned int bacsp = 1<<(ba->rwpt - VBBTBTCTPT);		// vertical-bit-array-cursor-step (in bytes)
 	int l = csi - csv;										// cell-space-length / size in nr. of cells
 	CA_CT* csc = csv;										// cell-space-cursor
 	int cp = 0;												// check-position-counter
 
 	if (!dr)
-		memset((UINT8*)ba->v, 0, ba->rc << (ba->rwpt - 3));		// vertical-bit-array has to be zero'd before use, as individual bits are 'ored' in
+		memset((UINT8*)ba->v, 0, ba->rc<<(ba->rwpt - 3));		// vertical-bit-array has to be zero'd before use, as individual bits are 'ored' in
 
 	goto calculate_next_check_position;
 
 check_position:
 	//if (DG) getch();
-	if (!(drw & ((1 << ba->mmwnpt) - 1))) {					// vba-destination-row behind memory-window or last row
-		drw -= 1 << ba->mmwnpt;								// > move destination-row back to beginning of memory-window
+	if (!(drw & ((1<<ba->mmwnpt) - 1))) {					// vba-destination-row behind memory-window or last row
+		drw -= 1<<ba->mmwnpt;								// > move destination-row back to beginning of memory-window
 		++dcl;												// > move to next column
 //		printf("drw %d  dcl %d\n", drw, dcl);
-		if (dcl == (1 << ba->rwpt)) {						// vba-destination-column behind row-width
-			drw += 1 << ba->mmwnpt;							// > move destination-row to beginning of next memory-window
+		if (dcl == (1<<ba->rwpt)) {						// vba-destination-column behind row-width
+			drw += 1<<ba->mmwnpt;							// > move destination-row to beginning of next memory-window
 			dcl = 0;										// > move destination-column to beginning / zero
 			if (drw >= ba->rc)								// if vba-destination-row is behind last row
 				goto end_loop;								// > conversion is finished
@@ -445,17 +445,17 @@ calculate_next_check_position:;								// calculate position in (horizontal-)sou
 	while (i >= l)											// avoid using expensive modulo operator, i.e. same as i %= l
 		i -= l;
 	csc = csv + i;
-	cp = min(1 << ba->mmwnpt, csi - csc);					// next check-position is next memory-window or earlier when the nr. of remaining cells after cursor in source array is smaller than size of memory window
+	cp = min(1<<ba->mmwnpt, csi - csc);					// next check-position is next memory-window or earlier when the nr. of remaining cells after cursor in source array is smaller than size of memory window
 convert_next_bit:;
-	VBBT* bac = ba->v + (((drw << ba->rwpt) + dcl) >> VBBTBTCTPT);	// vertical-bit-array-cursor
+	VBBT* bac = ba->v + (((drw<<ba->rwpt) + dcl)>>VBBTBTCTPT);	// vertical-bit-array-cursor
 	unsigned int bacst = dcl & VBBTBTCTMM;						// vertical-bit-array-cursor-shift (in bits)
 convert_next_bit_inner:
 	///		if (DG) printf("\33[%d;%df%.3x %c ", drw + 2, 8 + dcl * 6, csc - csv, *csc ? '#' : '.');
 	if (DG) printf("\tcsc %d  bar %d  bac %d   bax #%x  %c\n", csc - csv, drw, dcl, bac - ba->v, *csc ? '#' : '.');
 	if (dr)
-		*csc = 1 & ((*bac) >> bacst);						// convert vba -> csv
+		*csc = 1 & ((*bac)>>bacst);						// convert vba -> csv
 	else
-		*bac |= ((VBBT)*csc) << bacst;						// convert csv -> vba 
+		*bac |= ((VBBT)*csc)<<bacst;						// convert csv -> vba 
 	//
 	++drw;
 	++csc;
@@ -503,12 +503,12 @@ second lane
 vbatst(CA_CT* csv, CA_CT* csi, caBitArray* ba, int dr) {
 	unsigned int bcpt = 2;										// block-count as power of two
 	unsigned int rwwpt	= min(8, VBBTBTCTPT);					// row-width in bits/cells as power of 2
-	//unsigned int rwsz	= 1 << (rwwpt - 3);						// row-size in bytes
+	//unsigned int rwsz	= 1<<(rwwpt - 3);						// row-size in bytes
 	unsigned int rpbwol;										// rows per block without overlap
-	rpbwol = (ba->scsz + (1 << (bcpt + rwwpt)) - 1) / (1 << (bcpt + rwwpt));		// i.e.: scsz / (block-count * row-width) rounded up to multiple of (block-count * row-width)
+	rpbwol = (ba->scsz + (1<<(bcpt + rwwpt)) - 1) / (1<<(bcpt + rwwpt));		// i.e.: scsz / (block-count * row-width) rounded up to multiple of (block-count * row-width)
 	unsigned int rpbiol = rpbwol + ba->oc;						// rows per block including overlap
-	//unsigned int bksz = rpbiol << (rwwpt - 3);				// block-size in bytes
-	unsigned int vbasz = rpbiol << (bcpt + rwwpt - 3);			// vertical-bit-array-size in bytes
+	//unsigned int bksz = rpbiol<<(rwwpt - 3);				// block-size in bytes
+	unsigned int vbasz = rpbiol<<(bcpt + rwwpt - 3);			// vertical-bit-array-size in bytes
 
 	// convert cell-space-position to vba-position
 	CA_CT* csc = csv;										// cell-space-cursor
@@ -517,7 +517,7 @@ vbatst(CA_CT* csv, CA_CT* csi, caBitArray* ba, int dr) {
 
 	// convert vba-position to cell-space-position
 	unsigned int bi;			// block-iterator
-	for (bi = 0; bi < 1 << bcpt; bi++) {
+	for (bi = 0; bi < 1<<bcpt; bi++) {
 
 	}
 
@@ -536,7 +536,7 @@ convert_CA_CT_to_bit_array(CA_CT* csv, FBPT* bav, int ct) {
 	int bib = 0;						// bit index in individual bit-block
 	ct /= BPB;
 loop:
-	*bav |= (FBPT)*csv << bib;
+	*bav |= (FBPT)*csv<<bib;
 	++csv;
 	++bib;
 	if (bib < BPB)
@@ -561,7 +561,7 @@ convert_bit_array_to_CA_CT(FBPT* bav, CA_CT* csv, int ct) {
 	int bib = 0;						// bit index in individual bit-block
 	ct /= BPB;
 loop:
-	*csv = (FBPT)1 & (*bav >> bib);
+	*csv = (FBPT)1 & (*bav>>bib);
 	++csv;
 	++bib;
 	if (bib < BPB)
@@ -574,7 +574,7 @@ loop:
 
 	// Shorter version, but in assembler it is about the same length and seems (not really tested or benchmarked) to do more work
 	//for (int bi = 0; bi <= ct; ++bi)
-		//csv[bi] = (FBPT)1 & (bav[bi / BPB] >> ((bi % BPB)));
+		//csv[bi] = (FBPT)1 & (bav[bi / BPB]>>((bi % BPB)));
 }
 
 static UINT8* calt = NULL;									// ca-lookup-table/LUT
@@ -598,18 +598,18 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 				for (int p = 0; p < 14; ++p) {
 					// get result bit
 					int sr =
-						cr->mntl[0] * (1 & (cs >> (p + 0))) +
-						cr->mntl[1] * (1 & (cs >> (p + 1))) +
-						cr->mntl[2] * (1 & (cs >> (p + 2)));
+						cr->mntl[0] * (1 & (cs>>(p + 0))) +
+						cr->mntl[1] * (1 & (cs>>(p + 1))) +
+						cr->mntl[2] * (1 & (cs>>(p + 2)));
 					// set result bit in cs
 					if (cr->rltl[sr] == 0)
-						cs &= ((UINT16)~((UINT16)1 << p));
+						cs &= ((UINT16)~((UINT16)1<<p));
 					else
-						cs |= (UINT16)1 << p;
+						cs |= (UINT16)1<<p;
 				}
 			}
 			// store result byte
-			calt[((dn - 1) << 16) | i] = (UINT8)cs;
+			calt[((dn - 1)<<16) | i] = (UINT8)cs;
 			// inc / finish
 			if (i == MAXUINT16)
 				break;
@@ -629,7 +629,7 @@ int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
 		for (int bi = 0, sz = vba->scsz / 8; bi < sz; ++bi) {
 			UINT8* bya = vba->v;  // need to adress on byte-basis
 			bya += bi;
-			*bya = calt[(((UINT32)min(3, pgnc - 1)) << 16) | *(UINT16*)bya];
+			*bya = calt[(((UINT32)min(3, pgnc - 1))<<16) | *(UINT16*)bya];
 		}
 		pgnc -= min(4, pgnc);
 	}
@@ -661,9 +661,9 @@ int64_t CA_CNFN_BOOL(int64_t pgnc, caBitArray* vba) {
 
 			for (int tc = 0; tc < min(4, pgnc); ++tc) {
 				// rule 147 - not(b xor (a and c)) - https://www.wolframalpha.com/input/?i=not%28b+xor+%28a+and+c%29%29
-				//l = ~((l >> 1) ^ (l & (l >> 2)));
+				//l = ~((l>>1) ^ (l & (l>>2)));
 				// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
-				l = (l >> 1) ^ (l | (l >> 2));
+				l = (l>>1) ^ (l | (l>>2));
 			}
 			*(HBPT*)bya = (HBPT)l;
 		}
@@ -722,8 +722,8 @@ int64_t CA_CNFN_OMP_VBA_8x1x256(int64_t pgnc, caBitArray* vba) {
 			//	int from = ln * 512 / VBBB;
 			//	int to = (ln + 1) * 512 / VBBB;
 			//	for (int c = from; c < to; ++c) {
-			//		vba->v[(0 + vba->rc) * bbrw + c] = (vba->v[0 * bbrw + c] >> 1) | (vba->v[0 * bbrw + ((c + 1) % bbrw)] << VBPBMM);
-			//		vba->v[(1 + vba->rc) * bbrw + c] = (vba->v[1 * bbrw + c] >> 1) | (vba->v[1 * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+			//		vba->v[(0 + vba->rc) * bbrw + c] = (vba->v[0 * bbrw + c]>>1) | (vba->v[0 * bbrw + ((c + 1) % bbrw)]<<VBPBMM);
+			//		vba->v[(1 + vba->rc) * bbrw + c] = (vba->v[1 * bbrw + c]>>1) | (vba->v[1 * bbrw + ((c + 1) % bbrw)]<<VBPBMM);
 			//	}
 			//	//				printf("SYNC  gnc %d  ln %d\n", gnc, ln);
 			//}
@@ -798,7 +798,7 @@ CABitArrayPrepareOR(caBitArray* ba, int from, int to) {
 	for (int r = 0; r < ba->oc; ++r) {
 		for (int c = from / VBBB; c < to; ++c) {
 			ba->v[(r + ba->rc) * bbrw + c] =
-				(ba->v[r * bbrw + c] >> 1) | (ba->v[r * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+				(ba->v[r * bbrw + c]>>1) | (ba->v[r * bbrw + ((c + 1) % bbrw)]<<VBPBMM);
 			//			printf("VB OR  bbrw %d  x %d  x+1 %d %d\n", bbrw, c, (c + 1) & (bbrw - 1), ((c + 1) % bbrw));
 		}
 	}
@@ -810,10 +810,10 @@ int64_t CA_CNFN_OMP_TEST(int64_t pgnc, caBitArray* vba) {
 
 	int rc = vba->rc;			// row-count
 	int oc = vba->oc;			// overflow-count
-	int bbrw = 1 << (vba->rwpt + VBBTBTCTPT);			// bit-blocks per row
+	int bbrw = 1<<(vba->rwpt + VBBTBTCTPT);			// bit-blocks per row
 
 	__m256i* vm256i = (__m256i*)vba->v;										// first valid element / array-pointer to bit array
-	omp_set_num_threads(1 << NMTSPT);
+	omp_set_num_threads(1<<NMTSPT);
 	//printf("num thread 5D\n", );
 
 	__m256i ymm0, ymm1, ymm2;
@@ -836,7 +836,7 @@ int64_t CA_CNFN_OMP_TEST(int64_t pgnc, caBitArray* vba) {
 			//for (int r = 0; r < oc; ++r) {
 			//	for (int c = 256 * tdnm / VBBB; c < 256 * (tdnm + 1) / VBBB; ++c) {
 			//		vba->v[(r + vba->rc) * bbrw + c] =
-			//			(vba->v[r * bbrw + c] >> 1) | (vba->v[r * bbrw + ((c + 1) % bbrw)] << VBPBMM);
+			//			(vba->v[r * bbrw + c]>>1) | (vba->v[r * bbrw + ((c + 1) % bbrw)]<<VBPBMM);
 			//	}
 			//}
 #pragma omp barrier
@@ -845,12 +845,12 @@ int64_t CA_CNFN_OMP_TEST(int64_t pgnc, caBitArray* vba) {
 			for (int ri = 0; ri < rc; ++ri) {
 				///printf_s("Thread %d  gnc %lld  %p  %p\n", omp_get_thread_num(), gnc, vbac + (ri + 0) * NMTS, vbac + (ri + 1) * NMTS);
 				//printf_s("Thread %d  bb %d  gnc %lld\n", omp_get_thread_num(), tdnm + ri * NMTS, gnc);
-				ymm0 = _mm256_load_si256(vbac + (1 << NMTSPT) * (ri + 0));
-				ymm1 = _mm256_load_si256(vbac + (1 << NMTSPT) * (ri + 1));
-				ymm2 = _mm256_load_si256(vbac + (1 << NMTSPT) * (ri + 2));
+				ymm0 = _mm256_load_si256(vbac + (1<<NMTSPT) * (ri + 0));
+				ymm1 = _mm256_load_si256(vbac + (1<<NMTSPT) * (ri + 1));
+				ymm2 = _mm256_load_si256(vbac + (1<<NMTSPT) * (ri + 2));
 				ymm0 = _mm256_or_si256(ymm0, ymm2);
 				ymm0 = _mm256_xor_si256(ymm0, ymm1);
-				_mm256_store_si256(vbac + ri * (1 << NMTSPT), ymm0);
+				_mm256_store_si256(vbac + ri * (1<<NMTSPT), ymm0);
 			}
 		}
 	}
@@ -1153,9 +1153,9 @@ UINT32 HCMXSC = 8;							// hash-cell-maximum-seek-count
 //#define HCTBSMK ((1<<HCTBSPT) - 1)			// hash-cell-table-base-size-mask 
 
 #define HCIMASK (((UINT32)1<<HCISZPT)-1)	// hash-cell-index-mask /* for example: (u_int32_t)0xffff */
-#define HCISZ ((UINT32)1 << HCISZPT)		// hash-cell-index-size
-#define HCUCMK (((UINT32)1 << 24) - 1)		// hash-cell-usage-count-mask (use only last 24 bits)
-#define HCLLMK ((((UINT32)1 << 8) - 1) << 24)		// hash-cell-level-mask (use only first 8 bits)
+#define HCISZ ((UINT32)1<<HCISZPT)		// hash-cell-index-size
+#define HCUCMK (((UINT32)1<<24) - 1)		// hash-cell-usage-count-mask (use only last 24 bits)
+#define HCLLMK ((((UINT32)1<<8) - 1)<<24)		// hash-cell-level-mask (use only first 8 bits)
 //#define HCINCUC(x) (x = (x & HCLLMK) | ((x & HCUCMK) + 1))	// increase hash-cell-usage-count
 //#define HCDECUC(x) (x = (x & HCLLMK) | ((x & HCUCMK) - 1))	// decrease hash-cell-usage-count
 /* Hash-Cells-Node */
@@ -1243,7 +1243,7 @@ void HC_print_stats(int crsn) {
 			(double)hc_stats[i].ss / max(1.0, abs((double)hc_stats[i].sc)),
 			hc_stats[i].ucmn,
 			hc_stats[i].ucmx,
-			(double)((UINT64)HCTBS << i),
+			(double)((UINT64)HCTBS<<i),
 			i);
 	}
 	printf("---\n");
@@ -1297,8 +1297,8 @@ void HC_print_node(int ll, int mxll, HCI n) {
 		HC_print_node(ll - 1, mxll, hct[n].rn);
 		HC_print_node(ll - 1, mxll, hct[n].r);
 		//if (ll == 0) {
-		//	printf("%04x %04x  %X  ", hct[n].ln << 8, hct[n].rn, (hct[n].ln << 8) | hct[n].rn);
-		//	print_byte_as_bits(calt[0xFFFF & ((hct[n].ln << 8) | hct[n].rn)]);
+		//	printf("%04x %04x  %X  ", hct[n].ln<<8, hct[n].rn, (hct[n].ln<<8) | hct[n].rn);
+		//	print_byte_as_bits(calt[0xFFFF & ((hct[n].ln<<8) | hct[n].rn)]);
 		//	printf("\n");
 		//}
 	}
@@ -1319,10 +1319,10 @@ HCI convert_bit_array_to_hash_array(caBitArray* vba, int* ll) {
 		for (int sz = vba->scsz / 8 / 1; bi < sz; ++bi) {
 			int l = 0;		// level
 			UINT8* bya = vba->v;				// need to adress on byte-basis
-			ltnd = HC_add_node(0, 1 + ((bya[bi] >> 0) & 0x3), &l);
-			ltnd = HC_add_node(0, 1 + ((bya[bi] >> 2) & 0x3), &l);
-			ltnd = HC_add_node(0, 1 + ((bya[bi] >> 4) & 0x3), &l);
-			ltnd = HC_add_node(0, 1 + ((bya[bi] >> 6) & 0x3), &l);
+			ltnd = HC_add_node(0, 1 + ((bya[bi]>>0) & 0x3), &l);
+			ltnd = HC_add_node(0, 1 + ((bya[bi]>>2) & 0x3), &l);
+			ltnd = HC_add_node(0, 1 + ((bya[bi]>>4) & 0x3), &l);
+			ltnd = HC_add_node(0, 1 + ((bya[bi]>>6) & 0x3), &l);
 			if (l > ml)
 				ml = l;
 		}
@@ -1332,7 +1332,7 @@ HCI convert_bit_array_to_hash_array(caBitArray* vba, int* ll) {
 			int l = 0;		// level
 			UINT8* bya = vba->v;				// need to adress on byte-basis
 			ltnd = HC_add_node(0, bya[bi] & 0xF, &l);
-			ltnd = HC_add_node(0, bya[bi] >> 4, &l);
+			ltnd = HC_add_node(0, bya[bi]>>4, &l);
 			if (l > ml)
 				ml = l;
 		}
@@ -1368,7 +1368,7 @@ CA_CT* convert_hash_array_to_CA_CT(int ll, HCI n, CA_CT* clv, CA_CT* cli) {
 
 	if (ll < 0) {
 		for (int i = 0; i < HCTBS / 2; i++) {
-			*clv = (n - 1) & (1 << i) ? 1 : 0;
+			*clv = (n - 1) & (1<<i) ? 1 : 0;
 			++clv;
 		}
 
@@ -1444,7 +1444,7 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 	HCI cm;										// checksum
 	// base / lowest level > result is guaranteed to be present
 	//if (!ll) {
-	//	cm = ((ln << 2) | rn) + 1;
+	//	cm = ((ln<<2) | rn) + 1;
 	//	if (rt)
 	//		*rt = hct[cm].r;
 	//	return cm;
@@ -1454,7 +1454,7 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 	UINT32 cm32;
 	cm32 = fnv_32_buf(&ln, HCITPBYC, FNV1_32_INIT);
 	cm32 = fnv_32_buf(&rn, HCITPBYC, cm32);
-	cm = ((cm32 >> HCISZPT) ^ cm32);						// Xor-fold 32bit checksum to fit size of hash-table (needed mask is applied in while-loop).
+	cm = ((cm32>>HCISZPT) ^ cm32);						// Xor-fold 32bit checksum to fit size of hash-table (needed mask is applied in while-loop).
 
 	// Search for checksum.
 	int sc = 0;												// seek-count
@@ -1476,7 +1476,7 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 				break;
 			}
 			else {
-				UINT32 cnll = (hct[cm].uc & HCLLMK) >> 24;	// current-node-level
+				UINT32 cnll = (hct[cm].uc & HCLLMK)>>24;	// current-node-level
 				// Unused node found at checksum-index > recycle (delete unused node)
 				if ((!encm || cnll > enll) && (hct[cm].uc & HCUCMK) == 0) {
 					encm = cm;
@@ -1491,7 +1491,7 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 			hct[hct[cm].rn].uc--;
 			hct[hct[cm].r].uc--;
 			hct[cm].ln = 0;
-			int rcll = (hct[cm].uc & HCLLMK) >> 24;	// recycled-node-level	
+			int rcll = (hct[cm].uc & HCLLMK)>>24;	// recycled-node-level	
 			hc_stats[rcll].nc--;
 			hc_stats[rcll].rcct++;
 		}
@@ -1500,7 +1500,7 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 			hc_stats[ll].nc++;
 			hc_stats[ll].adct++;
 			// Add new branch / entry to hashtable
-			hct[cm].uc = ((UINT32)ll << 24) | 1;
+			hct[cm].uc = ((UINT32)ll<<24) | 1;
 			hct[cm].ln = ln;
 			hct[cm].rn = rn;
 			hct[ln].uc++;
@@ -1541,7 +1541,7 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 		//	printf("WARNING! Hash-table-size low, seek-count at %d\n", sc);
 		//}
 		// hashtable size to big > abort
-		if (sc >= 255 && ll == ((hct[cm].uc & HCLLMK) >> 24)) {
+		if (sc >= 255 && ll == ((hct[cm].uc & HCLLMK)>>24)) {
 			printf("ERROR! Hash-table-size insufficient, ABORTING, seek-count at %d\n", sc);
 			//getch();
 			hc_stats[ll].fc++;							// return some other node that has the same level
@@ -1573,17 +1573,17 @@ HCI HC_NG(int ll, int64_t* tm, HCI ln, HCI rn) {
 	if (!tm) {
 		rt = ln;
 	}
-	else if (tm == (int64_t)(HCTBS / 4) << ll) {
+	else if (tm == (int64_t)(HCTBS / 4)<<ll) {
 		rt = HC_find_or_add_branch(ll, ln, rn, NULL);
 		rt = hct[rt].r;
 		tm = 0;
 	}
-	else if (tm > (int64_t)(HCTBS / 4) << ll) {
+	else if (tm > (int64_t)(HCTBS / 4)<<ll) {
 		HCI nl;
 		nl = HC_find_or_add_branch(ll, ln, rn, NULL);
 		rt = HC_NG(ll + 1, &tm, nl, nl);
 	}
-	else if (tm < (int64_t)(HCTBS / 4) << ll) {
+	else if (tm < (int64_t)(HCTBS / 4)<<ll) {
 		HCI nl, nr;
 		nl = HC_NG(ll - 1, &tm, hct[ln].ln, hct[ln].rn);
 		nr = HC_NG(ll - 1, &tm, hct[ln].rn, hct[rn].ln);
@@ -1602,11 +1602,11 @@ int64_t CA_CNFN_HASH(int64_t pgnc, caBitArray* vba) {
 	}
 
 	HCI rtnd = NULL;		// result node
-	///	while (pgnc >= (int64_t)(HCTBS / 2) << hc_sl) {
+	///	while (pgnc >= (int64_t)(HCTBS / 2)<<hc_sl) {
 	if (sdmrpt) {
 		// Scale up space/size to allow calculate needed time
 ///		int ul = 0;
-///		while (pgnc >= ((int64_t)(HCTBS / 2) << hc_sl) << ul && ul < 63) {
+///		while (pgnc >= ((int64_t)(HCTBS / 2)<<hc_sl)<<ul && ul < 63) {
 ///			ul++;
 ///		}
 ///		for (int l = 0; l < ul; ++l) {
@@ -1717,20 +1717,20 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 				for (int p = 0; p < 14; ++p) {
 					// get result bit
 					int sr =
-						cr->mntl[0] * (1 & (cs >> (p + 0))) +
-						cr->mntl[1] * (1 & (cs >> (p + 1))) +
-						cr->mntl[2] * (1 & (cs >> (p + 2)));
+						cr->mntl[0] * (1 & (cs>>(p + 0))) +
+						cr->mntl[1] * (1 & (cs>>(p + 1))) +
+						cr->mntl[2] * (1 & (cs>>(p + 2)));
 					// set result bit in cs
 					if (cr->rltl[sr] == 0)
-						cs &= ((UINT16)~((UINT16)1 << p));
+						cs &= ((UINT16)~((UINT16)1<<p));
 					else
-						cs |= (UINT16)1 << p;
+						cs |= (UINT16)1<<p;
 				}
 			}
 			// store result byte
 			HCI nn;
-			nn = HC_find_or_add_branch(0, i & 0xFF, i >> 8, NULL);
-			hct[nn].r = cs & ((1 << (HCTBS / 2)) - 1);
+			nn = HC_find_or_add_branch(0, i & 0xFF, i>>8, NULL);
+			hct[nn].r = cs & ((1<<(HCTBS / 2)) - 1);
 			//
 			if (i == MAXUINT16)
 				break;
@@ -1746,19 +1746,19 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 				for (int p = 0; p < 6; ++p) {
 					// get result bit
 					int sr =
-						cr->mntl[0] * (1 & (cs >> (p + 0))) +
-						cr->mntl[1] * (1 & (cs >> (p + 1))) +
-						cr->mntl[2] * (1 & (cs >> (p + 2)));
+						cr->mntl[0] * (1 & (cs>>(p + 0))) +
+						cr->mntl[1] * (1 & (cs>>(p + 1))) +
+						cr->mntl[2] * (1 & (cs>>(p + 2)));
 					// set result bit in cs
 					if (cr->rltl[sr] == 0)
-						cs &= ((UINT8)~((UINT8)1 << p));
+						cs &= ((UINT8)~((UINT8)1<<p));
 					else
-						cs |= (UINT8)1 << p;
+						cs |= (UINT8)1<<p;
 				}
 			}
 			// store result byte
 			HCI nn;
-			nn = HC_find_or_add_branch(0, i & 0xF, i >> 4, NULL);
+			nn = HC_find_or_add_branch(0, i & 0xF, i>>4, NULL);
 			hct[nn].r = cs & 0xF;
 			//
 			if (i == MAXUINT8)
@@ -1774,23 +1774,23 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 			for (int p = 0; p < 2; ++p) {
 				// get result bit
 				int sr =
-					cr->mntl[0] * (1 & (cs >> (p + 0))) +
-					cr->mntl[1] * (1 & (cs >> (p + 1))) +
-					cr->mntl[2] * (1 & (cs >> (p + 2)));
+					cr->mntl[0] * (1 & (cs>>(p + 0))) +
+					cr->mntl[1] * (1 & (cs>>(p + 1))) +
+					cr->mntl[2] * (1 & (cs>>(p + 2)));
 				// set result bit in cs
 				if (cr->rltl[sr] == 0)
-					cs &= ((UINT8)~((UINT8)1 << p));
+					cs &= ((UINT8)~((UINT8)1<<p));
 				else
-					cs |= (UINT8)1 << p;
+					cs |= (UINT8)1<<p;
 			}
 			// store result byte
 			HCI nn, ln, rn, rt;
-			ln = 1 + ((i >> 0) & 0x3);
-			rn = 1 + ((i >> 2) & 0x3);
+			ln = 1 + ((i>>0) & 0x3);
+			rn = 1 + ((i>>2) & 0x3);
 			rt = 1 + (cs & 0x3);
 
 			nn = HC_find_or_add_branch(0, ln, rn, NULL);
-			//nn = (ln << 2 | rn) + 1;
+			//nn = (ln<<2 | rn) + 1;
 //nn = i);
 //hct[nn].ll = 0;
 ///hct[nn].fs = 1;
@@ -3506,7 +3506,7 @@ display_2d_matze(
 			goto draw;
 		}
 	move:;
-		int sw = (2 << dh) - 1;		// step width
+		int sw = (2<<dh) - 1;		// step width
 		switch (ag) {
 		case 4: ag = 0;						// no break wanted here!
 		case 0: rpnc += sw * hlpz;			break;
@@ -3824,10 +3824,10 @@ lifeanddrawnewcleanzoom(
 	int dyss;
 	switch (ds.fsme) {
 	case 0:
-		dyss = max(1, (cr->ncs * (max(1, max(1, ds.hlfs) * max(1, ds.vlfs)))) >> stst);
+		dyss = max(1, (cr->ncs * (max(1, max(1, ds.hlfs) * max(1, ds.vlfs))))>>stst);
 		break;
 	case 1:
-		dyss = max(1, ipow(cr->ncs, ds.hlfs * ds.vlfs) >> stst);
+		dyss = max(1, ipow(cr->ncs, ds.hlfs * ds.vlfs)>>stst);
 		break;
 	default:
 		dyss = 0;
@@ -3996,7 +3996,7 @@ lifeanddrawnewcleanzoom(
 				// 				printf("mxv %e  mnv %e\n", (double)mxv, (double)mnv);
 
 #define LOGPRECISION 8
-#define LOGSCALE (1U << LOGPRECISION)
+#define LOGSCALE (1U<<LOGPRECISION)
 
 				double mnvlg = log2((double)mnv);
 				double vlgrg = max(1.0, log2((double)mxv) - mnvlg);
@@ -4025,7 +4025,7 @@ lifeanddrawnewcleanzoom(
 																//UINT32 c;
 																//c = getColor(v, ds.cm, ds.crct, ds.gm);
 																//UINT32 gv = 255.0 - 255.0 * v;
-																//c = gv << 16 | gv << 8 | gv;
+																//c = gv<<16 | gv<<8 | gv;
 
 					*pbc = crtl[(int)(v * 0xFF)];
 				}
@@ -4037,7 +4037,7 @@ lifeanddrawnewcleanzoom(
 				// Count states
 				if (ds.stzm || ds.ar)
 					for (UINT32* pbc = pbv; pbc < pbi; ++pbc)
-						++sctbl[(*pbc) >> stst];
+						++sctbl[(*pbc)>>stst];
 				// Init min and max and state count table
 				dmn = 1.0;
 				if (!ds.stzm) {
@@ -4150,7 +4150,7 @@ lifeanddrawnewcleanzoom(
 					cltbl[i] = getColor(dsctbl[i], ds.cm, ds.crct, ds.gm);
 				// Draw space to pixel buffer
 				for (UINT32* pbc = pbv; pbc < pbi; ++pbc)
-					*pbc = cltbl[*pbc >> stst];
+					*pbc = cltbl[*pbc>>stst];
 			}
 
 			// Display test mode
@@ -4325,8 +4325,8 @@ ALSO is probably a good way to make it possible to enumerate the background patt
 //	int sc,		/* count of possible cell states */
 //	int rc		/* count of cells which will be randomized (density of random cells); everything else is background (which state is randomly choosen once */
 //	) {
-//	int randmax30bit = (RAND_MAX << 15) | RAND_MAX;	// 
-//	int rand30bit = (rand() << 15) | rand();
+//	int randmax30bit = (RAND_MAX<<15) | RAND_MAX;	// 
+//	int rand30bit = (rand()<<15) | rand();
 //	int ps = log(randmax30bit + 1) / log(sc); // , ipow(sc, rand() % 6; // pattern size
 //	ps = rand() % ps + 1;
 //	unsigned int bgi = rand30bit % ipow(sc, ps), bgp;
@@ -4429,7 +4429,7 @@ CA_MAIN(void) {
 	printf("sim  height %d  width %d\n", sfw.sim_height, sfw.sim_width);
 	pixel_effect_moving_gradient(&sfw);
 
-	int ca_space_sz = 1 << 16;// sfw.sim_width * 1; // 256;
+	int ca_space_sz = 1<<16;// sfw.sim_width * 1; // 256;
 	int rel_start_speed = 512;
 	int res = 1;				// ca-space-reset
 	int dyrt = 1;				// display-reset
@@ -4552,7 +4552,7 @@ CA_MAIN(void) {
 		nkb = eikb;
 		nkb.name = "speed";
 		nkb.val = &speed;
-		nkb.min = 0; nkb.max = 1 << 30;
+		nkb.min = 0; nkb.max = 1<<30;
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
@@ -4704,7 +4704,7 @@ CA_MAIN(void) {
 		nkb.name = "manual-shift-correction";
 		nkb.val = &ds.mlsc;
 		nkb.slct_key = SDLK_F10;
-		nkb.min = -(1 << 30); nkb.max = 1 << 30; nkb.wpad = 0;
+		nkb.min = -(1<<30); nkb.max = 1<<30; nkb.wpad = 0;
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
@@ -5038,8 +5038,8 @@ CA_MAIN(void) {
 						for (int i = 0; i < rs; i += HCTBS) {
 							uint32_t rbs = pcg32_random();			// generate 32 bits of randomnes
 							int l = 0;								// level
-							rmnd = HC_add_node(0, 1 + ((rbs >> 0) & 0x3), &l);
-							rmnd = HC_add_node(0, 1 + ((rbs >> 2) & 0x3), &l);
+							rmnd = HC_add_node(0, 1 + ((rbs>>0) & 0x3), &l);
+							rmnd = HC_add_node(0, 1 + ((rbs>>2) & 0x3), &l);
 							if (l > ml)
 								ml = l;
 						}
@@ -5281,7 +5281,7 @@ CA_MAIN(void) {
 					CA_RandomizeSpace(ca_space + ca_space_sz / 2 - ca_space_sz / wf / 2, ca_space_sz / wf, cr.ncs, RAND_MAX, 3);
 					break;
 				case SDLK_t:
-					cr.rl = (((UINT64)pcg32_random_r(&pcgr)) << 32 | pcg32_random_r(&pcgr)) % cr.nrls;
+					cr.rl = (((UINT64)pcg32_random_r(&pcgr))<<32 | pcg32_random_r(&pcgr)) % cr.nrls;
 
 					cr = CA_Rule(cr);
 					CA_RandomizeSpace(ca_space, ca_space_sz, cr.ncs, ipow(2, pcg32_boundedrand(10)), 3);
@@ -5303,7 +5303,7 @@ CA_MAIN(void) {
 									hct[hct[i].rn].uc--;
 									hct[hct[i].r].uc--;
 									hct[i].ln = 0;
-									int rcll = (hct[i].uc & HCLLMK) >> 24;	// recycled-node-level	
+									int rcll = (hct[i].uc & HCLLMK)>>24;	// recycled-node-level	
 									hc_stats[rcll].nc--;
 									hc_stats[rcll].rcct++;
 								}
@@ -5728,7 +5728,7 @@ NEWDIFFUSION() {
 						mn = lv;
 					uint8_t v;
 					v = (uint8_t)((lv - ltmn) / rg * 0xFF * 10);
-					*px = v << 16 | v << 8 | v;
+					*px = v<<16 | v<<8 | v;
 					++cc,
 						++px,
 						++cfv;
@@ -5770,7 +5770,7 @@ NEWDIFFUSION() {
 							mn = lv;
 						uint8_t v;
 						v = (uint8_t)((lv - ltmn) / rg * 0xFF * 10);
-						*px = v << 16 | v << 8 | v;
+						*px = v<<16 | v<<8 | v;
 					}
 					++cc,
 						++px,
@@ -5809,7 +5809,7 @@ NEWDIFFUSION() {
 						mn = lv;
 					uint8_t v;
 					v = (uint8_t)((lv - ltmn) / rg * 0xFF * 4);
-					*px = v << 16 | v << 8 | v;
+					*px = v<<16 | v<<8 | v;
 					++cc,
 						++px,
 						++cfv;
@@ -5996,7 +5996,7 @@ ONED_DIFFUSION(void) {
 			for (int i = 0; i < scsz; ++i) {
 				unsigned char bw;
 				bw = 255 - (unsigned char)(255 * (dwnr - dwnr * sl * (log(ans[i]) - lgmn)));
-				*px = bw << 16 | bw << 8 | bw;
+				*px = bw<<16 | bw<<8 | bw;
 				++px;
 			}
 			/* calc next */
