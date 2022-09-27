@@ -98,24 +98,24 @@ CA_RULE {
 const CA_RULE CA_RULE_EMPTY = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
 /* Bit-array */
-#define VBBT UINT32									// vertical-bit-block-type - datatype used to do operations (esp. bit manipulation) on vertical-bit-array
-#define VBBTBTCTPT 5								// vertical-bit-block-type-bit-count as power of 2
-#define VBBTBTCTMM ((1<<VBBTBTCTPT) - 1)			// vertical-bit-block-type-bit-count-mod-mask - is equivalent to X % vertical-bit-block-type-bit-count (must be power of 2)
+#define BBT UINT32									// bit-block-type - datatype used to do operations (esp. bit manipulation) on vertical-bit-array
+#define BBTBTCTPT 5									// bit-block-type-bit-count as power of 2
+#define BBTBTCTMM ((1<<BBTBTCTPT) - 1)				// bit-block-type-bit-count-mod-mask - is equivalent to X % vertical-bit-block-type-bit-count (must be power of 2)
 #define FBPT UINT16									// full-bit-block c-data-type
 #define HBPT UINT8									// half-bit-block c-data-type
 #define BPB 16										// bits per block, i.e. bits per elemet in bta 
 #define BPBMM (BPB - 1)								// bits-per-block-mod-mask - X & (BPB - 1) is equivalent to X % BPB when BPB is power of 2 
 #define BPBS 4										// bits per block shift - i.e. nr of bit shifts needed to divide by BPB
 typedef struct caBitArray {
-	VBBT* v;										// vertical-bit-array (vba) - first valid element / array-pointer to bit array
-	int ct;											// vba-count in bits - must be initialized to be at least scsz
-	int lcpt;										// vba-lane-count in nr. of lanes (columns) as power of two
-	int lwpt;										// vba-lane-width in bits as power of two
-	int rwpt;										// vba-row-width in bits as power of two; rwpt = lwpt + lcpt
-	int oc;											// vba-overflow-row-count - set to 0 for auto-initialization
-	int mmwnpt;										// vba-memory-window in rows/lines - must be power of two! - only by convertBetweenCACTandCABitArray; (each rw wide; should allow memory accesses to stay within fastest cache
-	int rc;											// vba-row-count (without overflow rows)		(automatically determined by initCABitArray)
-	int sz;											// vba-size in bytes							(automatically determined by initCABitArray)
+	BBT* v;											// vertical/horizontal-bit-array (vhba) - first valid element / array-pointer to bit array
+	int ct;											// vhba-count in bits (including overlap) - must be initialized to be at least scsz
+	int bcpt;										// block-count as power of two
+	int lcpt;										// vhba-lane-count in nr. of lanes (columns) as power of two
+	int lwpt;										// vhba-lane-width in bits/cells as power of two
+	int rwpt;										// vhba-row-width in bits as power of two; rwpt = lwpt + lcpt
+	int oc;											// vhba-overflow-row-count - set to 0 for auto-initialization
+	int mwpt;										// vhba-memory-window in rows/lines - must be power of two! - only by convertBetweenCACTandCABitArray; (each rw wide; should allow memory accesses to stay within fastest cache
+	int rc;											// vhba-row-count (without overflow rows)		(automatically determined by initCABitArray)
 	CA_CT* clsc;									// cell-space
 	int scsz;										// cell-space-size in nr of cells
 	int brsz;										// cell-space-border-size in nr of cells
@@ -371,37 +371,60 @@ void print_bits(unsigned char* bytes, size_t num_bytes, int bypr) {
 __inline
 void
 CABitArrayPrepareOR(caBitArray* ba, int from, int to) {
-	int bbrwpt = ba->rwpt - VBBTBTCTPT;			// bit-blocks per row as power of two
+	int bbrwpt = ba->rwpt - BBTBTCTPT;			// bit-blocks per row as power of two
 	if (to == 0)
 		to = 1<<bbrwpt;
 	else
-		to >>= VBBTBTCTPT;
+		to >>= BBTBTCTPT;
 	for (int r = 0; r < ba->oc; ++r) {
-		for (int c = from>>VBBTBTCTPT; c < to; ++c) {
+		for (int c = from>>BBTBTCTPT; c < to; ++c) {
 			ba->v[((r + ba->rc)<<bbrwpt) + c] =
-				(ba->v[(r<<bbrwpt) + c]>>1) | (ba->v[(r<<bbrwpt) + ((c + 1) & ((1<<bbrwpt) - 1))]<<VBBTBTCTMM);
+				(ba->v[(r<<bbrwpt) + c]>>1) | (ba->v[(r<<bbrwpt) + ((c + 1) & ((1<<bbrwpt) - 1))]<<BBTBTCTMM);
 						//printf("VB OR  bbrw %d  x %d  x+1 %d %d\n", bbrw, c, (c + 1) & (bbrw - 1), ((c + 1) % bbrw));
 		}
 	}
 }
 
+void
+clearCABitArray(caBitArray* vba) {
+	memset(vba, 0, sizeof(*vba));
+}
+
 /*
 * See notes of caBitArray struct!
+* 
+* ba	must be initialized by clearCABitArray after allocation; at least scsz must be initialized
 */
 void
-initCABitArray(caBitArray* ba, CA_RULE* rl) {
-	ba->lwpt = max(3, ba->lwpt);
+initCAVerticalBitArray(caBitArray* ba, CA_RULE* rl) {
+	ba->ct = max(ba->ct, ba->scsz);
+	ba->oc = max(ba->oc, rl->ncn - 1);
+	ba->lwpt = max(BBTBTCTPT, ba->lwpt);
 	ba->lcpt = max(0, ba->lcpt);
 	ba->rwpt = ba->lwpt + ba->lcpt;
-	ba->rc = max(1, (ba->ct + (1<<ba->rwpt) - 1) / (1<<ba->rwpt));						// calculate row-count by dividing ct by rw rounding up
-	ba->rc = ((ba->rc + (1<<ba->mmwnpt) - 1) / (1<<ba->mmwnpt)) * (1<<ba->mmwnpt);				// align row-count with memory-window
-	ba->ct = ba->rc<<ba->rwpt;
-	if (ba->oc == 0)
-		ba->oc = rl->ncn - 1;
-	ba->sz = (ba->ct + (ba->oc<<ba->rwpt))>>3;
+
+
+	int rpb;						// rows per block (without overlap)
+	rpb = ba->ct;
+	rpb = max(1, (rpb + (1 << ba->rwpt) - 1) / (1 << ba->rwpt));
+	rpb = max(1, (rpb + (1 << ba->bcpt) - 1) / (1 << ba->bcpt));
+	rpb = max(1, (rpb + (1 << ba->mwpt) - 1) / (1 << ba->mwpt) * (1 << ba->mwpt));
+
+	//unsigned int rpbwol;										// rows per block without overlap
+	//rpbwol = (ba->ct + (1 << (ba->bcpt + ba->rwpt)) - 1) / (1 << (ba->bcpt + ba->rwpt));		// i.e.: scsz / (block-count * row-width) rounded up to multiple of (block-count * row-width)
+	//unsigned int rpbiol = rpbwol + ba->oc;						// rows per block including overlap
+	////unsigned int bksz = rpbiol<<(rwwpt - 3);				// block-size in bytes
+	//unsigned int vbasz = rpbiol << (bcpt + rwwpt - 3);			// vertical-bit-array-size in bytes
+
+ba->rc = rpb<<ba->bcpt;
+
+	//ba->rc = max(1, (ba->ct + (1<<ba->rwpt) - 1) / (1<<ba->rwpt));						// calculate row-count by dividing ct by rw rounding up
+	//ba->rc = ((ba->rc + (1<<ba->mwpt) - 1) / (1<<ba->mwpt)) * (1<<ba->mwpt);		// align row-count with memory-window
+	ba->ct = (rpb + ba->oc)<<(ba->rwpt + ba->bcpt);
+
 	_aligned_free(ba->v);							// aligned memory management may be necesary for use of some intrinsic or opencl functions
-	ba->v = _aligned_malloc(ba->sz, BYAL);
-	printf("initCABitArray   end    ct %d  rc %d  oc %d  rw 2^%d (%d)  lc 2^%d  lw 2^%d  mmwn 2^%d (%d)  sz %d  v %p\n", ba->ct, ba->rc, ba->oc, ba->rwpt, 1<<ba->rwpt, ba->lcpt, ba->lwpt, ba->mmwnpt, (1<<ba->mmwnpt), ba->sz, ba->v);
+	ba->v = _aligned_malloc(ba->ct>>3, BYAL);
+	printf("initCAVerticalBitArray   scsz %d  ct %d  bc 2^%d  rc %d  oc %d  rw 2^%d (%d)  lc 2^%d  lw 2^%d  mw 2^%d  v %p\n", ba->scsz, ba->ct, ba->bcpt, ba->rc, ba->oc, ba->rwpt, 1<<ba->rwpt, ba->lcpt, ba->lwpt, ba->mwpt,ba->v);
 }
 
 /* 
@@ -417,24 +440,24 @@ convertBetweenCACTandCABitArray(CA_CT* csv, CA_CT* csi, caBitArray* ba, int dr) 
 
 	int dcl = 0;											// vertical-bit-array-destination-column
 	int drw = 0;											// vertical-bit-array-destination-row
-	unsigned int bacsp = 1<<(ba->rwpt - VBBTBTCTPT);		// vertical-bit-array-cursor-step (in bytes)
+	unsigned int bacsp = 1<<(ba->rwpt - BBTBTCTPT);			// vertical-bit-array-cursor-step (in bytes)
 	int l = csi - csv;										// cell-space-length / size in nr. of cells
 	CA_CT* csc = csv;										// cell-space-cursor
 	int cp = 0;												// check-position-counter
 
 	if (!dr)
-		memset((UINT8*)ba->v, 0, ba->rc<<(ba->rwpt - 3));		// vertical-bit-array has to be zero'd before use, as individual bits are 'ored' in
+		memset((UINT8*)ba->v, 0, ba->ct>>3);				// vertical-bit-array has to be zero'd before use, as individual bits are 'ored' in
 
 	goto calculate_next_check_position;
 
 check_position:
 	//if (DG) getch();
-	if (!(drw & ((1<<ba->mmwnpt) - 1))) {					// vba-destination-row behind memory-window or last row
-		drw -= 1<<ba->mmwnpt;								// > move destination-row back to beginning of memory-window
+	if (!(drw & ((1<<ba->mwpt) - 1))) {						// vba-destination-row behind memory-window or last row
+		drw -= 1<<ba->mwpt;									// > move destination-row back to beginning of memory-window
 		++dcl;												// > move to next column
 //		printf("drw %d  dcl %d\n", drw, dcl);
-		if (dcl == (1<<ba->rwpt)) {						// vba-destination-column behind row-width
-			drw += 1<<ba->mmwnpt;							// > move destination-row to beginning of next memory-window
+		if (dcl == (1<<ba->rwpt)) {							// vba-destination-column behind row-width
+			drw += 1<<ba->mwpt;								// > move destination-row to beginning of next memory-window
 			dcl = 0;										// > move destination-column to beginning / zero
 			if (drw >= ba->rc)								// if vba-destination-row is behind last row
 				goto end_loop;								// > conversion is finished
@@ -445,17 +468,17 @@ calculate_next_check_position:;								// calculate position in (horizontal-)sou
 	while (i >= l)											// avoid using expensive modulo operator, i.e. same as i %= l
 		i -= l;
 	csc = csv + i;
-	cp = min(1<<ba->mmwnpt, csi - csc);					// next check-position is next memory-window or earlier when the nr. of remaining cells after cursor in source array is smaller than size of memory window
+	cp = min(1<<ba->mwpt, csi - csc);						// next check-position is next memory-window or earlier when the nr. of remaining cells after cursor in source array is smaller than size of memory window
 convert_next_bit:;
-	VBBT* bac = ba->v + (((drw<<ba->rwpt) + dcl)>>VBBTBTCTPT);	// vertical-bit-array-cursor
-	unsigned int bacst = dcl & VBBTBTCTMM;						// vertical-bit-array-cursor-shift (in bits)
+	BBT* bac = ba->v + (((drw<<ba->rwpt) + dcl)>>BBTBTCTPT);	// vertical-bit-array-cursor
+	unsigned int bacst = dcl & BBTBTCTMM;						// vertical-bit-array-cursor-shift (in bits)
 convert_next_bit_inner:
 	///		if (DG) printf("\33[%d;%df%.3x %c ", drw + 2, 8 + dcl * 6, csc - csv, *csc ? '#' : '.');
 	if (DG) printf("\tcsc %d  bar %d  bac %d   bax #%x  %c\n", csc - csv, drw, dcl, bac - ba->v, *csc ? '#' : '.');
 	if (dr)
 		*csc = 1 & ((*bac)>>bacst);						// convert vba -> csv
 	else
-		*bac |= ((VBBT)*csc)<<bacst;						// convert csv -> vba 
+		*bac |= ((BBT)*csc)<<bacst;						// convert csv -> vba 
 	//
 	++drw;
 	++csc;
@@ -501,8 +524,6 @@ second lane
 
 /*
 vbatst(CA_CT* csv, CA_CT* csi, caBitArray* ba, int dr) {
-	unsigned int bcpt = 2;										// block-count as power of two
-	unsigned int rwwpt	= min(8, VBBTBTCTPT);					// row-width in bits/cells as power of 2
 	//unsigned int rwsz	= 1<<(rwwpt - 3);						// row-size in bytes
 	unsigned int rpbwol;										// rows per block without overlap
 	rpbwol = (ba->scsz + (1<<(bcpt + rwwpt)) - 1) / (1<<(bcpt + rwwpt));		// i.e.: scsz / (block-count * row-width) rounded up to multiple of (block-count * row-width)
@@ -683,86 +704,20 @@ int64_t CA_CNFN_DISABLED(int64_t pgnc, caBitArray* vba) {
 	return 0;
 }
 
-void CA_CNITFN_OMP_VBA_8x32(caBitArray* vba, CA_RULE* cr) {
-	vba->lcpt = 3;
-	vba->lwpt = 5;
-	vba->mmwnpt = 2;
-	initCABitArray(vba, cr);
-}
-
 void CA_CNITFN_VBA_16x256(caBitArray* vba, CA_RULE* cr) {
 	vba->lcpt = 0;
 	vba->lwpt = 8;
-	vba->mmwnpt = 3;
+	vba->mwpt = 3;
 	vba->oc = 14;
-	initCABitArray(vba, cr);
-}
-
-void CA_CNITFN_OMP_VBA_8x1x256(caBitArray* vba, CA_RULE* cr) {
-	vba->lcpt = 1;
-	vba->lwpt = 8;
-	vba->mmwnpt = 8;
-	vba->oc = 4;
-	initCABitArray(vba, cr);
-}
-
-int64_t CA_CNFN_OMP_VBA_8x1x256(int64_t pgnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-
-#pragma omp parallel num_threads(2)
-	{
-		int ln = omp_get_thread_num();
-		int gnc = pgnc;
-		while (gnc-- > 0) {
-			//
-//#pragma omp barrier
-			//{
-			//	//				CABitArrayPrepareOR(vba, ln * 512, (ln + 1) * 512);
-			//	int bbrw = vba->rw / VBBB;			// bit-blocks per row
-			//	int from = ln * 512 / VBBB;
-			//	int to = (ln + 1) * 512 / VBBB;
-			//	for (int c = from; c < to; ++c) {
-			//		vba->v[(0 + vba->rc) * bbrw + c] = (vba->v[0 * bbrw + c]>>1) | (vba->v[0 * bbrw + ((c + 1) % bbrw)]<<VBPBMM);
-			//		vba->v[(1 + vba->rc) * bbrw + c] = (vba->v[1 * bbrw + c]>>1) | (vba->v[1 * bbrw + ((c + 1) % bbrw)]<<VBPBMM);
-			//	}
-			//	//				printf("SYNC  gnc %d  ln %d\n", gnc, ln);
-			//}
-//#pragma omp barrier
-			//
-			__m256i* vbac;
-			vbac = (__m256i*)vba->v + ln * 2;
-			for (int ri = 0; ri < vba->rc; ++ri) {
-				//				printf("gnc %d  ln %d  ri %d  vbac %p  vbai %p\n", gnc, ln, ri, vbac, (char*)vba->v + vba->sz);
-								// first lane
-				__m256i ymm0 = _mm256_load_si256(vbac + 0);
-				__m256i ymm1 = _mm256_load_si256(vbac + 4);
-				__m256i ymm2 = _mm256_load_si256(vbac + 8);
-				ymm0 = _mm256_or_si256(ymm0, ymm2);
-				ymm0 = _mm256_xor_si256(ymm0, ymm1);
-				_mm256_store_si256(vbac + 0, ymm0);
-				// second lane
-				__m256i ymm3 = _mm256_load_si256(vbac + 1);
-				__m256i ymm4 = _mm256_load_si256(vbac + 5);
-				__m256i ymm5 = _mm256_load_si256(vbac + 9);
-				ymm3 = _mm256_or_si256(ymm3, ymm5);
-				ymm3 = _mm256_xor_si256(ymm3, ymm4);
-				_mm256_store_si256(vbac + 1, ymm3);
-				//
-				vbac += 4;
-			}
-		}
-	}
-
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return 0;
+	initCAVerticalBitArray(vba, cr);
 }
 
 #define NMTSPT 3			// number of threads
 void CA_CNITFN_OMP_TEST(caBitArray* vba, CA_RULE* cr) {
 	vba->lcpt = NMTSPT;
 	vba->lwpt = 8;
-	vba->mmwnpt = 2;
-	initCABitArray(vba, cr);
+	vba->mwpt = 2;
+	initCAVerticalBitArray(vba, cr);
 }
 
 /*
@@ -810,7 +765,7 @@ int64_t CA_CNFN_OMP_TEST(int64_t pgnc, caBitArray* vba) {
 
 	int rc = vba->rc;			// row-count
 	int oc = vba->oc;			// overflow-count
-	int bbrw = 1<<(vba->rwpt + VBBTBTCTPT);			// bit-blocks per row
+	int bbrw = 1<<(vba->rwpt + BBTBTCTPT);			// bit-blocks per row
 
 	__m256i* vm256i = (__m256i*)vba->v;										// first valid element / array-pointer to bit array
 	omp_set_num_threads(1<<NMTSPT);
@@ -957,44 +912,45 @@ int64_t CA_CNFN_VBA_16x256(int64_t pgnc, caBitArray* vba) {
 void CA_CNITFN_VBA_2x256(caBitArray* vba, CA_RULE* cr) {
 	vba->lcpt = 1;
 	vba->lwpt = 8;
-	vba->mmwnpt = 3;
+	vba->mwpt = 3;
 	vba->oc = 2;
-	initCABitArray(vba, cr);
+	initCAVerticalBitArray(vba, cr);
 }
 
 void CA_CNITFN_VBA_1x32(caBitArray* vba, CA_RULE* cr) {
 	vba->lcpt = 0;
 	vba->lwpt = 5;
-	vba->mmwnpt = 6;
-	initCABitArray(vba, cr);
+	vba->mwpt = 6;
+	initCAVerticalBitArray(vba, cr);
 }
 
 void CA_CNITFN_VBA_1x64(caBitArray* vba, CA_RULE* cr) {
 	vba->lcpt = 0;
 	vba->lwpt = 6;
-	vba->mmwnpt = 5;
-	initCABitArray(vba, cr);
+	vba->mwpt = 5;
+	initCAVerticalBitArray(vba, cr);
 }
 
 void CA_CNITFN_VBA_2x32(caBitArray* vba, CA_RULE* cr) {
 	vba->lcpt = 1;
 	vba->lwpt = 5;
-	vba->mmwnpt = 5;
-	initCABitArray(vba, cr);
+	vba->mwpt = 5;
+	initCAVerticalBitArray(vba, cr);
 }
 
 void CA_CNITFN_VBA_4x32(caBitArray* vba, CA_RULE* cr) {
 	vba->lcpt = 2;
 	vba->lwpt = 5;
-	vba->mmwnpt = 4;
-	initCABitArray(vba, cr);
+	vba->mwpt = 4;
+	initCAVerticalBitArray(vba, cr);
 }
 
 void CA_CNITFN_VBA_1x256(caBitArray* vba, CA_RULE* cr) {
 	vba->lcpt = 0;
 	vba->lwpt = 8;
-	vba->mmwnpt = 10;
-	initCABitArray(vba, cr);
+	vba->mwpt = 2;
+	vba->bcpt = 1;
+	initCAVerticalBitArray(vba, cr);
 }
 
 int64_t CA_CNFN_VBA_1x32(int64_t pgnc, caBitArray* vba) {
@@ -1042,30 +998,6 @@ int64_t CA_CNFN_VBA_4x32(int64_t pgnc, caBitArray* vba) {
 			vbac[ri + 2] = vbac[ri + 6] ^ (vbac[ri + 2] | vbac[ri + 10]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
 			vbac[ri + 3] = vbac[ri + 7] ^ (vbac[ri + 3] | vbac[ri + 11]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
 		}
-
-		pgnc--;
-	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
-	return 0;
-}
-
-int64_t CA_CNFN_OMP_VBA_8x32(int64_t pgnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
-	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
-
-		int ln;// , ri;
-		int c = 0;
-#pragma omp parallel for //private (vbac, ln, ri)
-		for (ln = 0; ln < 8; ln++) {
-			UINT32* vbac;
-			vbac = (UINT32*)vba->v + ln;
-			for (int ri = 0; ri < vba->rc * 8; ri += 8) {
-				++c;
-				vbac[ri] = vbac[ri + 8] ^ (vbac[ri] | vbac[ri + 16]);			// equivalent rule 54 - (p, q, r) -> q xor (p or r) - https://www.wolframalpha.com/input/?i=rule+54
-			}
-		}
-		//printf("c %d\n", c);
 
 		pgnc--;
 	}
@@ -2142,8 +2074,8 @@ void CA_CNITFN_OPENCL(caBitArray* vba, CA_RULE* cr) {
 	//
 	vba->lcpt = 8;
 	vba->lwpt = 2 + 4;
-	vba->mmwnpt = 2;
-	initCABitArray(vba, cr);
+	vba->mwpt = 2;
+	initCAVerticalBitArray(vba, cr);
 }
 
 #if ENABLE_CL 
@@ -2672,8 +2604,6 @@ typedef enum {
 	CM_VBA_1x64,										// vertical-bit-array	1 lane with 64bit					rule 54 hardcoded
 	CM_VBA_2x256,										// vertical-bit-array	AVX - 2 lanes with 256bit			rule 54 hardcoded
 	CM_VBA_16x256,										// vertical-bit-array	AVX - 16 lanes with 256bit			rule 54 hardcoded
-	CM_OMP_VBA_8x32,									// vertical-bit-array	OpenMP - 8 lanes with 32bit			rule 54 hardcoded
-	CM_OMP_VBA_8x1x256,									// vertical-bit-array	AVX & OpenMP - 8 lanes with 256bit	rule 54 hardcoded
 	CM_HASH,											// bit-array			hash-table
 	CM_OPENCL,											// OpenCL
 	CM_MAX,
@@ -2705,16 +2635,6 @@ struct {
 		.name = "CM_OPENCL",
 		.cnfn = CA_CNFN_OPENCL,
 		.itfn = CA_CNITFN_OPENCL
-	},
-	[CM_OMP_VBA_8x32] = {
-		.name = "CM_OMP_VBA_8x32",
-		.cnfn = CA_CNFN_OMP_VBA_8x32,
-		.itfn = CA_CNITFN_OMP_VBA_8x32
-	},
-	[CM_OMP_VBA_8x1x256] = {
-		.name = "CM_OMP_VBA_8x1x256",
-		.cnfn = CA_CNFN_OMP_VBA_8x1x256,
-		.itfn = CA_CNITFN_OMP_VBA_8x1x256
 	},
 	[CM_VBA_16x256] = {
 		.name = "CM_VBA_16x256",
@@ -3773,8 +3693,8 @@ lifeanddrawnewcleanzoom(
 	/* Init testing-cell-space-buffer */
 	static CA_CT* tcsv = NULL;									// test-cell-array first valid element
 // temporary code for debugging
-	static caBitArray tvba = { .v = NULL, .rc = 0, .rwpt = 0, .clsc = NULL, .ct = 0, .lcpt = 0, .lwpt = 0, .mmwnpt = 0, .oc = 0, .scsz = 0 };				// row-first/vertical-bit-array
-	// end temporary code
+	static caBitArray tvba = { .v = NULL };
+// end temporary code
 	if (ds.tm == 2) {
 		_aligned_free(tcsv);									// aligned memory management may be necesary for use of some intrinsic or opencl functions
 		tcsv = _aligned_malloc((scsz + cr->ncn - 1) * sizeof * tcsv, BYAL);
@@ -3782,7 +3702,7 @@ lifeanddrawnewcleanzoom(
 		// temporary code for debugging
 		if (cnmd == CM_HASH) {
 			if (tvba.v == NULL || res) {
-				tvba.ct = scsz;
+				clearCABitArray(&tvba);
 				tvba.cr = cr;
 				tvba.scsz = scsz;
 				tvba.brsz = brsz;
@@ -3794,11 +3714,11 @@ lifeanddrawnewcleanzoom(
 	}
 
 	/* Init bit-array-cell-space-buffer */
-	static caBitArray vba = { .v = NULL, .rc = 0, .rwpt = 0, .clsc = NULL, .ct = 0, .lcpt = 0, .lwpt = 0, .mmwnpt = 0, .oc = 0, .scsz = 0 };				// row-first/vertical-bit-array
+	static caBitArray vba = { .v = NULL };
 	if (vba.v == NULL || res) {
 		/* Copy cells of wrap behind buffer (last cells in line) */
 		///		memcpy(csv + scsz, csv, brsz * sizeof * csv);
-		vba.ct = scsz;
+		clearCABitArray(&vba);
 		vba.cr = cr;
 		vba.clsc = csv;
 		vba.scsz = scsz;
@@ -4199,7 +4119,7 @@ lifeanddrawnewcleanzoom(
 				}
 			}
 			printf("\n  lp %d  er %.2%%f\n", lp, 100.0 / scsz * ec);
-			printf("  Press any key\n"); getch();
+///			printf("  Press any key\n"); getch();
 		}
 	}
 
