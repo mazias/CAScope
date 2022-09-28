@@ -2606,7 +2606,7 @@ typedef enum {
 // computation-settings-array
 struct {
 	char* name;
-	int64_t(*cnfn)(int64_t, caBitArray*);			// computation-function
+	int64_t(*cnfn)(int64_t, caBitArray*);				// computation-function
 	void		(*itfn)(caBitArray*);					// init-function
 	void		(*scfn)(caBitArray*);					// sync-(ca-space)-function
 } const ca_cnsgs[CM_MAX] = {
@@ -2687,6 +2687,7 @@ struct {
 		.scfn = CA_SCFN_HASH
 	},
 };
+const char* cm_names[CM_MAX] = { 0 };	// flat array of strings of computation-function-names
 
 #define CS_SYS_BLOCK_SZ	0x04			// system-block-size - used by bit-shifting operations
 #define CS_BLOCK_SZ		0xFF			// size of one row / nr. of columns
@@ -4420,7 +4421,6 @@ CA_MAIN(void) {
 		nkb = eikb;
 		nkb.name = "computation-mode"; nkb.description = "";
 		// create value-strings-array
-		const char* cm_names[CM_MAX];
 		for (int c = 0; c < CM_MAX; c++) {
 			cm_names[c] = ca_cnsgs[c].name;
 		}

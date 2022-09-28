@@ -8,7 +8,7 @@ typedef struct tagSIMFW_KeyBinding tagSIMFW_KeyBinding;
 struct tagSIMFW_KeyBinding {
 	const char *name;					// should not contain white-space
 	const char *description;
-	const char* const* value_strings;				// pointer to array of strings - MUST hold a value for all indizes from min to max (or be null)
+	const char* const* value_strings;				// pointer to array of strings - when not null it MUST hold a value for all indizes from min to max
 	//double *dbl_var;
 	//int *int_var;
 	int slct_key;
