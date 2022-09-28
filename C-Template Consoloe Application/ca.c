@@ -108,15 +108,15 @@ const CA_RULE CA_RULE_EMPTY = { 0, 0, 0, 0, 0, 0, 0, 0 };
 #define BPBS 4										// bits per block shift - i.e. nr of bit shifts needed to divide by BPB
 typedef struct caBitArray {
 	BBT* v;											// vertical/horizontal-bit-array (vhba) - first valid element / array-pointer to bit array
-	int ct;											// vhba-count in bits (including overlap)
+	int ct;											// vhba-count in bits (including overlap rows)
 	int bcpt;										// vhba-block-count as power of two
-	int bh;											// vhba-block-height in nr. of rows - including overlap rows
+	int bh;											// vhba-block-height in nr. of rows (including overlap rows)
 	int lcpt;										// vhba-lane-count in nr. of lanes (columns) as power of two
 	int lwpt;										// vhba-lane-width in bits/cells as power of two
 	int rwpt;										// vhba-row-width in bits as power of two; rwpt = lwpt + lcpt
-	int oc;											// vhba-overflow-row-count - set to 0 for auto-initialization
+	int oc;											// vhba-overlap-row-count - set to 0 for auto-initialization
 	int mwpt;										// vhba-memory-window in rows/lines - must be power of two! - only by convertBetweenCACTandCABitArray; (each rw wide; should allow memory accesses to stay within fastest cache
-	int rc;											// vhba-row-count (without overflow rows)		(automatically determined by initCAVerticalBitArray)
+	int rc;											// vhba-row-count (including overlap rows)		(automatically determined by initCAVerticalBitArray)
 	CA_CT* clsc;									// cell-space
 	int scsz;										// cell-space-size in nr of cells
 	int brsz;										// cell-space-border-size in nr of cells
@@ -434,7 +434,7 @@ convertBetweenCACTandCABitArray(CA_CT* csv, CA_CT* csi, caBitArray* ba, int dr) 
 	int dcl = 0;											// vertical-bit-array-destination-column
 	int drw = 0;											// vertical-bit-array-destination-row (relative to block)
 	int dbk = 0;											// vertical-bit-array-destination-block
-	unsigned int bacsp = 1 << (ba->rwpt - BBTBTCTPT);			// vertical-bit-array-cursor-step (in bytes)
+	unsigned int bacsp = 1 << (ba->rwpt - BBTBTCTPT);		// vertical-bit-array-cursor-step (in bytes)
 	int l = csi - csv;										// cell-space-length / size in nr. of cells
 	CA_CT* csc = csv;										// cell-space-cursor
 	int cp = 0;												// check-position-counter
@@ -446,15 +446,19 @@ convertBetweenCACTandCABitArray(CA_CT* csv, CA_CT* csi, caBitArray* ba, int dr) 
 
 check_position:
 	//if (DG) getch();
-	if (!(drw & ((1 << ba->mwpt) - 1))) {						// vba-destination-row behind memory-window or last row
-		drw -= 1 << ba->mwpt;									// > move destination-row back to beginning of memory-window
+	if (!(drw & ((1 << ba->mwpt) - 1))) {					// vba-destination-row behind memory-window or last row
+		drw -= 1 << ba->mwpt;								// > move destination-row back to beginning of memory-window
 		++dcl;												// > move to next column
 		//		printf("drw %d  dcl %d\n", drw, dcl);
-		if (dcl == (1 << ba->rwpt)) {							// vba-destination-column behind row-width
-			drw += 1 << ba->mwpt;								// > move destination-row to beginning of next memory-window
+		if (dcl == (1 << ba->rwpt)) {						// if vba-destination-column behind row-width
 			dcl = 0;										// > move destination-column to beginning / zero
-			if (drw >= ba->rc - ba->oc)						// if vba-destination-row is behind last row
-				goto end_loop;								// > conversion is finished
+			drw += 1 << ba->mwpt;							// > move destination-row to beginning of next memory-window
+			if (drw >= ba->bh - ba->oc) {					// if vba-destination-row is behind last row in block
+				drw = 0;									// > move destination row (relative to block) to zero
+				dbk++;										// > move to next destination-block
+				if (dbk >= 1 << ba->bcpt)					// if vba-destination-block is behind last block
+					goto end_loop;							// > conversion is finished
+			}
 		}
 	}
 calculate_next_check_position:;								// calculate position in (horizontal-)source-byte-array
@@ -463,10 +467,9 @@ calculate_next_check_position:;								// calculate position in (horizontal-)sou
 		i -= l;
 	csc = csv + i;
 	cp = min(1 << ba->mwpt, csi - csc);						// next check-position is next memory-window or earlier when the nr. of remaining cells after cursor in source array is smaller than size of memory window
-convert_next_bit:;
-	BBT* bac = ba->v + (((drw << ba->rwpt) + dcl) >> BBTBTCTPT);	// vertical-bit-array-cursor
+	BBT* bac = ba->v + (((((dbk * ba->bh) + drw) << ba->rwpt) + dcl) >> BBTBTCTPT);	// vertical-bit-array-cursor
 	unsigned int bacst = dcl & BBTBTCTMM;						// vertical-bit-array-cursor-shift (in bits)
-convert_next_bit_inner:
+convert_next_cell:
 	///		if (DG) printf("\33[%d;%df%.3x %c ", drw + 2, 8 + dcl * 6, csc - csv, *csc ? '#' : '.');
 	if (DG) printf("\tcsc %d  bar %d  bac %d   bax #%x  %c\n", csc - csv, drw, dcl, bac - ba->v, *csc ? '#' : '.');
 	if (dr)
@@ -480,7 +483,7 @@ convert_next_bit_inner:
 	if (!cp)
 		goto check_position;
 	bac += bacsp;
-	goto convert_next_bit_inner;
+	goto convert_next_cell;
 end_loop:
 	if (DG) printf("]\n");
 }
@@ -758,7 +761,7 @@ int64_t CA_CNFN_OMP_TEST(int64_t pgnc, caBitArray* vba) {
 	CABitArrayPrepareOR(vba, 0, 0);
 
 	int rc = vba->rc - vba->oc;			// row-count
-	int oc = vba->oc;			// overflow-count
+	int oc = vba->oc;					// overlap-count
 	int bbrw = 1 << (vba->rwpt + BBTBTCTPT);			// bit-blocks per row
 
 	__m256i* vm256i = (__m256i*)vba->v;										// first valid element / array-pointer to bit array
