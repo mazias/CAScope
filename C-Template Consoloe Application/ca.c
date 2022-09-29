@@ -371,17 +371,32 @@ void print_bits(unsigned char* bytes, size_t num_bytes, int bypr) {
 */
 __inline
 void
-CABitArrayPrepareOR(caBitArray* ba, int from, int to) {
-	int bbrwpt = ba->rwpt - BBTBTCTPT;			// bit-blocks per row as power of two
-	if (to == 0)
-		to = 1 << bbrwpt;
-	else
-		to >>= BBTBTCTPT;
-	for (int r = 0; r < ba->oc; ++r) {
-		for (int c = from >> BBTBTCTPT; c < to; ++c) {
-			ba->v[((r + ba->rc - ba->oc) << bbrwpt) + c] =
-				(ba->v[(r << bbrwpt) + c] >> 1) | (ba->v[(r << bbrwpt) + ((c + 1) & ((1 << bbrwpt) - 1))] << BBTBTCTMM);
-			//printf("VB OR  bbrw %d  x %d  x+1 %d %d\n", bbrw, c, (c + 1) & (bbrw - 1), ((c + 1) % bbrw));
+CABitArrayPrepareOL(caBitArray* ba) {
+	int bbrwpt = ba->rwpt - BBTBTCTPT;						// bit-blocks per row as power of two
+	int bcmk = (1 << ba->bcpt) - 1;							// block-count-mask (x & bcmk == x % bc)
+	int ccmk = (1 << bbrwpt) - 1;							// column-count-mask (x & bcmk == x % bc)
+	int ofszbb = ba->oc * (1 << (ba->rwpt - BBTBTCTPT));	// overflow-size in nr of BBTs
+	int bkhtbt = ba->bh * (1 << (ba->rwpt - 3));			// block-height (including overflow) in bytes
+	int ofszbt = ba->oc * (1 << (ba->rwpt - 3));			// overflow-size in bytes
+	int	to = 1 << bbrwpt;
+	for (int b = 0; b < 1 << ba->bcpt; ++b) {
+		BBT* cb = ba->v + ((((b + 0))			* ba->bh) << bbrwpt);		// current-block
+		BBT* nb = ba->v + ((((b + 1) & bcmk)	* ba->bh) << bbrwpt);		// next-block
+		BBT* of = cb + ((ba->bh - ba->oc) << bbrwpt);						// overflow - beginning of overflow region
+//printf("b %d  cb %4d  nb %4d  of %4d  bh %d/%d\n", b, cb - ba->v, nb - ba->v, of - ba->v, ba->bh, ba->bh<< bbrwpt);
+		memcpy(
+			(char*)cb + bkhtbt - ofszbt,
+			(char*)cb,
+			ofszbt);
+		for (int r = 0; r < ba->oc; ++r) {
+			BBT* cr = of + (r << bbrwpt);		// current-row
+			for (int c = 0; c < to; ++c) {
+				cr[c] = cr[c] >> 1;
+				if (c == to - 1)
+					cr[c] |= nb[(r << bbrwpt)] << BBTBTCTMM;
+				else
+					cr[c] |= cr[(c + 1) & ccmk] << BBTBTCTMM;
+			}
 		}
 	}
 }
@@ -417,7 +432,7 @@ initCAVerticalBitArray(caBitArray* ba, CA_RULE* rl) {
 	ba->ct = ba->bh << (ba->rwpt + ba->bcpt);
 
 	ba->v = _aligned_malloc(ba->ct >> 3, BYAL);
-	printf("initCAVerticalBitArray   scsz %d  ct %d  bc 2^%d  rc %d  oc %d  rw 2^%d (%d)  lc 2^%d  lw 2^%d  mw 2^%d  v %p\n", ba->scsz, ba->ct, ba->bcpt, ba->rc, ba->oc, ba->rwpt, 1 << ba->rwpt, ba->lcpt, ba->lwpt, ba->mwpt, ba->v);
+	printf("initCAVerticalBitArray   scsz %d  ct %d  bc 2^%d  bh %d  rc %d  oc %d  rw 2^%d (%d)  lc 2^%d  lw 2^%d  mw 2^%d  v %p\n", ba->scsz, ba->ct, ba->bcpt, ba->bh, ba->rc, ba->oc, ba->rwpt, 1 << ba->rwpt, ba->lcpt, ba->lwpt, ba->mwpt, ba->v);
 }
 
 /*
@@ -462,9 +477,11 @@ check_position:
 					goto end_loop;							// > conversion is finished
 			}
 		}
+//		printf("         dbk %d  drw %d  dcl %d\n", dbk, drw, dcl);
 	}
 calculate_next_check_position:;								// calculate position in (horizontal-)source-byte-array
-	int i = drw + dcl * (ba->rc - ba->oc);					// cell-space-index of next cell to convert
+	int i = ((dbk * (ba->bh - ba->oc)) << ba->rwpt) + drw + dcl * (ba->bh - ba->oc);					// cell-space-index of next cell to convert#
+//printf("i %d\n", i);
 	while (i >= l)											// avoid using expensive modulo operator, i.e. same as i %= l
 		i -= l;
 	csc = csv + i;
@@ -472,6 +489,7 @@ calculate_next_check_position:;								// calculate position in (horizontal-)sou
 	BBT* bac = ba->v + (((((dbk * ba->bh) + drw) << ba->rwpt) + dcl) >> BBTBTCTPT);	// vertical-bit-array-cursor
 	unsigned int bacst = dcl & BBTBTCTMM;						// vertical-bit-array-cursor-shift (in bits)
 convert_next_cell:
+//printf("bac  %p  dbk %d  drw %d  dcl %d  cp %d  csc %d\n", bac, dbk, drw, dcl, cp, csc - csv);
 	///		if (DG) printf("\33[%d;%df%.3x %c ", drw + 2, 8 + dcl * 6, csc - csv, *csc ? '#' : '.');
 	if (DG) printf("\tcsc %d  bar %d  bac %d   bax #%x  %c\n", csc - csv, drw, dcl, bac - ba->v, *csc ? '#' : '.');
 	if (dr)
@@ -723,105 +741,134 @@ void CA_CNITFN_VBA_16x256(caBitArray* vba, CA_RULE* cr) {
 	initCAVerticalBitArray(vba, cr);
 }
 
-#define NMTSPT 3			// number of threads
 void CA_CNITFN_OMP_TEST(caBitArray* vba, CA_RULE* cr) {
-	vba->lcpt = NMTSPT;
+	vba->lcpt = 0;
 	vba->lwpt = 8;
 	vba->mwpt = 2;
+	vba->bcpt = 3;
+	vba->oc = 4;
 	initCAVerticalBitArray(vba, cr);
+	// temp TODO
+	convertBetweenCACTandCABitArray(vba, 0);
+	//	getch();
 }
 
-/*
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 0);
+int64_t CA_CNFN_VBA_1x256(int64_t gnc, caBitArray* vba) {
+	convertBetweenCACTandCABitArray(vba, 0);
+
+	int oc = vba->oc;				// overflow-count
+	int rc = vba->rc - oc;			// row-count without overlap
+
 	while (gnc > 0) {
 		gnc--;
-		CABitArrayPrepareOR(vba, 0, 0);
+		CABitArrayPrepareOL(vba);
 		__m256i* vbac = (__m256i*)vba->v;
-		int rc = vba->rc - ba->oc;
-		register __m256i ymm0;
+		register __m256i ymm0, ymm1, ymm2;
 		for (int ri = 0; ri < rc; ++ri) {
-			ymm0 = _mm256_or_si256(_mm256_load_si256(vbac + ri), _mm256_load_si256(vbac + ri + 2));
-			ymm0 = _mm256_xor_si256(ymm0, _mm256_load_si256(vbac + ri + 1));
+			ymm0 = _mm256_load_si256(vbac + ri + 0);
+			ymm1 = _mm256_load_si256(vbac + ri + 1);
+			ymm2 = _mm256_load_si256(vbac + ri + 2);
+			ymm0 = _mm256_or_si256(ymm0, ymm2);
+			ymm0 = _mm256_xor_si256(ymm0, ymm1);
 			_mm256_store_si256(vbac + ri, ymm0);
 		}
 	}
-	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
+
 	return gnc;
-*/
+}
 
-/*
+int64_t CA_CNFN_OMP_TEST(int64_t gnc, caBitArray* vba) {
+	omp_set_num_threads(1 << vba->bcpt);
 
-from, to		in bits, must be multiple of size of ba->v type (currently 32)
-
-__inline
-void
-CABitArrayPrepareOR(caBitArray* ba, int from, int to) {
-	int bbrw = ba->rw / VBBB;			// bit-blocks per row
-	if (to == 0)
-		to = bbrw;
-	else
-		to = to / VBBB;
-	for (int r = 0; r < ba->oc; ++r) {
-		for (int c = from / VBBB; c < to; ++c) {
-			ba->v[(r + ba->rc - ba->oc) * bbrw + c] =
-				(ba->v[r * bbrw + c]>>1) | (ba->v[r * bbrw + ((c + 1) % bbrw)]<<VBPBMM);
-			//			printf("VB OR  bbrw %d  x %d  x+1 %d %d\n", bbrw, c, (c + 1) & (bbrw - 1), ((c + 1) % bbrw));
-		}
-	}
-}*/
-
-int64_t CA_CNFN_OMP_TEST(int64_t pgnc, caBitArray* vba) {
 	convertBetweenCACTandCABitArray(vba, 0);
-	CABitArrayPrepareOR(vba, 0, 0);
 
-	int rc = vba->rc - vba->oc;			// row-count
-	int oc = vba->oc;					// overlap-count
-	int bbrw = 1 << (vba->rwpt + BBTBTCTPT);			// bit-blocks per row
+	int oc = vba->oc;				// overflow-count
+	int bh = vba->bh - oc;			// block-height without overlap
 
-	__m256i* vm256i = (__m256i*)vba->v;										// first valid element / array-pointer to bit array
-	omp_set_num_threads(1 << NMTSPT);
-	//printf("num thread 5D\n", );
+	int gwolp = oc / 2;				// generations that can be calculated without overlap prepare
+	int gwolc = 0;					// generations without overlap prepare count
 
-	__m256i ymm0, ymm1, ymm2;
+	BBT* v = vba->v;
 
-#pragma omp parallel default(none) private(ymm0, ymm1, ymm2) shared(bbrw, vba, oc, rc, vm256i, pgnc)
+	#pragma omp parallel default(none) shared(vba) firstprivate(v, bh, oc, gnc)
+	//		for (int bkcr = 0; bkcr < 1 << vba->bcpt; bkcr++)
 	{
-		int64_t gnc = pgnc;
-		int tdnm = omp_get_thread_num();		// thread-number
-		__m256i* vbac = vm256i + tdnm;
-
-
+		int bkcr = omp_get_thread_num();
+//		printf("thread #%d\n", bkcr);
 		while (gnc > 0) {
-			gnc--;
-			//#pragma omp master
-			//{
-			//	CABitArrayPrepareOR(vba, 0, 0);
+			gnc -= 2;
+			//if (!gwolc || gwolc == gwolp) {
+			//	gwolc = 0;
+			//	CABitArrayPrepareOL(vba);
 			//}
-
-			//#pragma omp barrier
-			//for (int r = 0; r < oc; ++r) {
-			//	for (int c = 256 * tdnm / VBBB; c < 256 * (tdnm + 1) / VBBB; ++c) {
-			//		vba->v[(r + vba->rc - ba->oc) * bbrw + c] =
-			//			(vba->v[r * bbrw + c]>>1) | (vba->v[r * bbrw + ((c + 1) % bbrw)]<<VBPBMM);
-			//	}
-			//}
+			//else
+			//	gwolc += 2;
 #pragma omp barrier
 
-//#pragma omp parallel
-			for (int ri = 0; ri < rc; ++ri) {
-				///printf_s("Thread %d  gnc %lld  %p  %p\n", omp_get_thread_num(), gnc, vbac + (ri + 0) * NMTS, vbac + (ri + 1) * NMTS);
-				//printf_s("Thread %d  bb %d  gnc %lld\n", omp_get_thread_num(), tdnm + ri * NMTS, gnc);
-				ymm0 = _mm256_load_si256(vbac + (1 << NMTSPT) * (ri + 0));
-				ymm1 = _mm256_load_si256(vbac + (1 << NMTSPT) * (ri + 1));
-				ymm2 = _mm256_load_si256(vbac + (1 << NMTSPT) * (ri + 2));
-				ymm0 = _mm256_or_si256(ymm0, ymm2);
-				ymm0 = _mm256_xor_si256(ymm0, ymm1);
-				_mm256_store_si256(vbac + ri * (1 << NMTSPT), ymm0);
+#pragma omp master
+			CABitArrayPrepareOL(vba);
+
+#pragma omp barrier
+
+#pragma omp parallel
+			{
+				__m256i* vbac = (__m256i*)v + bkcr * (bh + oc);
+				for (int ri = 0; ri < bh; ++ri) {
+					//register __m256i ymm0 = _mm256_load_si256(vbac + ri + 0);
+					//register __m256i ymm1 = _mm256_load_si256(vbac + ri + 1);
+					//register __m256i ymm2 = _mm256_load_si256(vbac + ri + 2);
+
+					//ymm0 = _mm256_or_si256(ymm0, ymm2);
+					//ymm0 = _mm256_xor_si256(ymm0, ymm1);
+
+					//_mm256_store_si256(vbac + ri, ymm0);
+					// calc two gens
+					register __m256i ymm0 = _mm256_load_si256(vbac + ri + 0);
+					register __m256i ymm1 = _mm256_load_si256(vbac + ri + 1);
+					register __m256i ymm2 = _mm256_load_si256(vbac + ri + 2);
+					register __m256i ymm3 = _mm256_load_si256(vbac + ri + 3);
+					register __m256i ymm4 = _mm256_load_si256(vbac + ri + 4);
+
+					ymm0 = _mm256_or_si256(	ymm0, ymm2);
+					ymm0 = _mm256_xor_si256(ymm0, ymm1);
+
+					ymm1 = _mm256_or_si256(	ymm1, ymm3);
+					ymm1 = _mm256_xor_si256(ymm1, ymm2);
+
+					ymm2 = _mm256_or_si256(	ymm2, ymm4);
+					ymm2 = _mm256_xor_si256(ymm2, ymm3);
+
+					ymm0 = _mm256_or_si256(	ymm0, ymm2);
+					ymm0 = _mm256_xor_si256(ymm0, ymm1);
+
+					_mm256_store_si256(vbac + ri, ymm0);
+				}
 			}
 		}
 	}
 
 	return 0;
+
+	// calc two gens
+	//register __m256i ymm0 = _mm256_load_si256(vbac + ri + 0);
+	//register __m256i ymm1 = _mm256_load_si256(vbac + ri + 1);
+	//register __m256i ymm2 = _mm256_load_si256(vbac + ri + 2);
+	//register __m256i ymm3 = _mm256_load_si256(vbac + ri + 3);
+	//register __m256i ymm4 = _mm256_load_si256(vbac + ri + 4);
+
+	//ymm0 = _mm256_or_si256(	ymm0, ymm2);
+	//ymm0 = _mm256_xor_si256(ymm0, ymm1);
+
+	//ymm1 = _mm256_or_si256(	ymm1, ymm3);
+	//ymm1 = _mm256_xor_si256(ymm1, ymm2);
+
+	//ymm2 = _mm256_or_si256(	ymm2, ymm4);
+	//ymm2 = _mm256_xor_si256(ymm2, ymm3);
+
+	//ymm0 = _mm256_or_si256(	ymm0, ymm2);
+	//ymm0 = _mm256_xor_si256(ymm0, ymm1);
+
+	//_mm256_store_si256(vbac + ri, ymm0);
 }
 
 int64_t CA_CNFN_VBA_16x256(int64_t pgnc, caBitArray* vba) {
@@ -830,7 +877,7 @@ int64_t CA_CNFN_VBA_16x256(int64_t pgnc, caBitArray* vba) {
 	convertBetweenCACTandCABitArray(vba, 0);
 	while (pgnc > 0) {
 		pgnc -= 4;
-		CABitArrayPrepareOR(vba, 0, 0);
+		CABitArrayPrepareOL(vba);
 
 		register __m256i ymm0, ymm1, ymm2, ymm3, ymm4, ymm5, ymm6, ymm7;
 		register __m256i ymm8, ymm9;
@@ -960,12 +1007,15 @@ void CA_CNITFN_VBA_1x256(caBitArray* vba, CA_RULE* cr) {
 	vba->mwpt = 2;
 	vba->bcpt = 0;
 	initCAVerticalBitArray(vba, cr);
+// temp TODO
+	convertBetweenCACTandCABitArray(vba, 0);
+//	getch();
 }
 
 int64_t CA_CNFN_VBA_1x32(int64_t pgnc, caBitArray* vba) {
 	convertBetweenCACTandCABitArray(vba, 0);
 	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
+		CABitArrayPrepareOL(vba);
 
 		UINT32* vbac = (UINT32*)vba->v;
 		for (int ri = 0; ri < vba->rc - vba->oc; ++ri) {
@@ -981,7 +1031,7 @@ int64_t CA_CNFN_VBA_1x32(int64_t pgnc, caBitArray* vba) {
 int64_t CA_CNFN_VBA_2x32(int64_t pgnc, caBitArray* vba) {
 	convertBetweenCACTandCABitArray(vba, 0);
 	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
+		CABitArrayPrepareOL(vba);
 
 		UINT32* vbac = (UINT32*)vba->v;
 		for (int ri = 0; ri < (vba->rc - vba->oc) * 2; ri += 2) {
@@ -998,7 +1048,7 @@ int64_t CA_CNFN_VBA_2x32(int64_t pgnc, caBitArray* vba) {
 int64_t CA_CNFN_VBA_4x32(int64_t pgnc, caBitArray* vba) {
 	convertBetweenCACTandCABitArray(vba, 0);
 	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
+		CABitArrayPrepareOL(vba);
 
 		UINT32* vbac = (UINT32*)vba->v;
 		for (int ri = 0; ri < (vba->rc - vba->oc) * 4; ri += 4) {
@@ -1017,7 +1067,7 @@ int64_t CA_CNFN_VBA_4x32(int64_t pgnc, caBitArray* vba) {
 int64_t CA_CNFN_VBA_1x64(int64_t pgnc, caBitArray* vba) {
 	convertBetweenCACTandCABitArray(vba, 0);
 	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
+		CABitArrayPrepareOL(vba);
 
 		UINT64* vbac = (UINT64*)vba->v;
 		for (int ri = 0; ri < vba->rc - vba->oc; ++ri) {
@@ -1030,31 +1080,10 @@ int64_t CA_CNFN_VBA_1x64(int64_t pgnc, caBitArray* vba) {
 	return 0;
 }
 
-int64_t CA_CNFN_VBA_1x256(int64_t gnc, caBitArray* vba) {
-	convertBetweenCACTandCABitArray(vba, 0);
-	while (gnc > 0) {
-		gnc--;
-		CABitArrayPrepareOR(vba, 0, 0);
-		__m256i* vbac = (__m256i*)vba->v;
-		int rc = vba->rc - vba->oc;
-		register __m256i ymm0;
-		for (int ri = 0; ri < rc; ++ri) {
-			ymm0 = _mm256_or_si256(_mm256_load_si256(vbac + ri), _mm256_load_si256(vbac + ri + 2));
-			ymm0 = _mm256_xor_si256(ymm0, _mm256_load_si256(vbac + ri + 1));
-			_mm256_store_si256(vbac + ri, ymm0);
-			// works, but seems to be slower
-			//*((__m256i*)vba->v + ri) = _mm256_or_si256(*((__m256i*)vba->v + ri), *((__m256i*)vba->v + ri + 2));
-			//*((__m256i*)vba->v + ri) = _mm256_xor_si256(*((__m256i*)vba->v + ri), *((__m256i*)vba->v + ri + 1));
-		}
-	}
-
-	return gnc;
-}
-
 int64_t CA_CNFN_VBA_2x256(int64_t pgnc, caBitArray* vba) {
 	convertBetweenCACTandCABitArray(vba, 0);
 	while (pgnc > 0) {
-		CABitArrayPrepareOR(vba, 0, 0);
+		CABitArrayPrepareOL(vba);
 
 		__m256i* vbac = (__m256i*)vba->v;
 		for (int ri = 0; ri < (vba->rc - vba->oc) * 2; ri += 2) {
@@ -3746,6 +3775,25 @@ lifeanddrawnewcleanzoom(
 		if (ca_cnsgs[cnmd].itfn != NULL) {
 			printf("CA_CNITFN  %s\n", ca_cnsgs[cnmd].name);
 			(ca_cnsgs[cnmd].itfn)(&vba, cr);
+
+			/* Test cell-space conversion */
+			if (ds.tm == 2 && tcsv != NULL) {
+				if (ca_cnsgs[cnmd].scfn != NULL) {
+					printf("Testing cell-space-conversion\n");
+					printf("\tCA_SCFN  %s\n", ca_cnsgs[cnmd].name);
+					CA_CT* ctcsv = NULL;
+					ctcsv = malloc(scsz * sizeof * tcsv);
+					vba.clsc = ctcsv;
+					(ca_cnsgs[cnmd].scfn)(&vba, cr);
+					vba.clsc = csv;
+					int mcr = memcmp(csv, ctcsv, scsz * sizeof * csv);
+					free(ctcsv);
+					if (mcr != 0)
+						printf("\tERROR  mcr %d  sz %d\n", mcr, scsz * sizeof * csv);
+					else
+						printf("\tsuccess\n");
+				}
+			}
 		}
 		else {
 			printf("CA_CNITFN  %s  IS NULL\n", ca_cnsgs[cnmd].name);
@@ -4102,7 +4150,7 @@ lifeanddrawnewcleanzoom(
 		}
 	}
 
-	/* test calculation */
+	/* Test calculation */
 	if (ds.tm == 2 && tcsv != NULL) {
 		// calculate test-cell-space to compare
 // temporary code for debugging
@@ -5528,7 +5576,7 @@ CA_MAIN(void) {
 		static LONGLONG fpstr = 0;
 		static uint64_t fpstm = 0;
 		double trdn = timeit_duration_nr(fpstr);		// fps-timer-duration
-		if (trdn >= 10.0) {
+		if (trdn >= 1.0) {
 			if (cnmd == CM_HASH) {
 				HC_print_stats(1);
 				for (int i = 0; i < HCTMXLV - 2; i++) {
@@ -5548,12 +5596,13 @@ CA_MAIN(void) {
 			}
 			else
 				ds = (double)speed;
-			printf("cnmd %s  sz %.2e  sd %.2e  cs %.2e  tm %.2e\n",
+			printf("cnmd %s  sz %.2e  sd %.2e  cs %.2e (%5.2f GB/s)  tm %.2e\n",
 				ca_cnsgs[cnmd].name,
 				(double)ca_space_sz,
 				ds,
-				ds * ca_space_sz / sfw.avg_duration,
-				(double)tm * ca_space_sz);
+				ds* ca_space_sz / sfw.avg_duration,
+				ds* ca_space_sz / sfw.avg_duration / 8.0 / 1024.0 / 1024.0 / 1024.0,
+				(double)tm* ca_space_sz);
 			fpstr = 0;
 		}
 		if (!fpstr) {
