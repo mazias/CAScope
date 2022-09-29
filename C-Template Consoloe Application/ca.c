@@ -2634,6 +2634,7 @@ typedef enum {
 	CM_SIMD,											// byte-array			single instruction multiple data
 	CM_LUT,												// bit-array			look-up-table
 	CM_VBA_1x256,										// vertical-bit-array	AVX	- 1 lane with 256bits			rule 54 hardcoded
+	CM_HASH,											// bit-array			hash-table
 	CM_OMP_TEST,										// OpenMP Test
 	CM_BOOL,											// bit-array			boolean operators					rule 54 hardcoded
 	CM_VBA_1x32,										// vertical-bit-array	1 lane with 32bit					rule 54 hardcoded
@@ -2642,7 +2643,6 @@ typedef enum {
 	CM_VBA_1x64,										// vertical-bit-array	1 lane with 64bit					rule 54 hardcoded
 	CM_VBA_2x256,										// vertical-bit-array	AVX - 2 lanes with 256bit			rule 54 hardcoded
 	CM_VBA_16x256,										// vertical-bit-array	AVX - 16 lanes with 256bit			rule 54 hardcoded
-	CM_HASH,											// bit-array			hash-table
 	CM_OPENCL,											// OpenCL
 	CM_MAX,
 } caComputationMode;
@@ -3745,19 +3745,19 @@ lifeanddrawnewcleanzoom(
 	// end temporary code
 	if (ds.tm == 2) {
 		_aligned_free(tcsv);									// aligned memory management may be necesary for use of some intrinsic or opencl functions
-		tcsv = _aligned_malloc((scsz + cr->ncn - 1) * sizeof * tcsv, BYAL);
-		memcpy(tcsv, csv, scsz * sizeof * tcsv);
+		tcsv = _aligned_malloc((scsz + cr->ncn - 1) * sizeof *tcsv, BYAL);
+		memcpy(tcsv, csv, scsz * sizeof *tcsv);
 		// temporary code for debugging
 		if (cnmd == CM_HASH) {
 			if (tvba.v == NULL || res) {
 				_aligned_free(tvba.v);									// aligned memory management may be necesary for use of some intrinsic or opencl functions
 				tvba = (const struct caBitArray){ 0 };
 				tvba.cr = cr;
+				tvba.clsc = tcsv;
 				tvba.scsz = scsz;
 				tvba.brsz = brsz;
 				CA_CNITFN_VBA_1x256(&tvba, cr);
 			}
-			tvba.clsc = tcsv;
 		}
 		// end temporary code
 	}
@@ -3777,12 +3777,12 @@ lifeanddrawnewcleanzoom(
 			(ca_cnsgs[cnmd].itfn)(&vba, cr);
 
 			/* Test cell-space conversion */
-			if (ds.tm == 2 && tcsv != NULL) {
+			if (ds.tm == 2) {
 				if (ca_cnsgs[cnmd].scfn != NULL) {
 					printf("Testing cell-space-conversion\n");
 					printf("\tCA_SCFN  %s\n", ca_cnsgs[cnmd].name);
 					CA_CT* ctcsv = NULL;
-					ctcsv = malloc(scsz * sizeof * tcsv);
+					ctcsv = malloc(scsz * sizeof * ctcsv);
 					vba.clsc = ctcsv;
 					(ca_cnsgs[cnmd].scfn)(&vba, cr);
 					vba.clsc = csv;
@@ -4156,6 +4156,7 @@ lifeanddrawnewcleanzoom(
 // temporary code for debugging
 		if (cnmd == CM_HASH) {
 			CA_CNFN_VBA_1x256(otm, &tvba);
+			CA_SCFN_VBA(&tvba);
 		}
 		// end temporary code
 		else {
