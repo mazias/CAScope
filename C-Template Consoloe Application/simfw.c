@@ -78,6 +78,54 @@ typedef struct tagSIMFW {
 #endif
 #include "simfw.h"
 
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+
+// from: https://stackoverflow.com/questions/34842526/update-console-without-flickering-c
+static HANDLE hOut = NULL;
+// x is the column, y is the row. The origin (0,0) is top-left.
+void SIMFW_ConsoleSetCursorPosition(int x, int y)
+{
+	// Get the Win32 handle representing standard output.
+	// This generally only has to be done once, so we make it static.
+	if (!hOut)
+		hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+
+	COORD coord = { (SHORT)x, (SHORT)y };
+	SetConsoleCursorPosition(hOut, coord);
+}
+
+void SIMFW_ConsoleCLS()
+{
+	// Get the Win32 handle representing standard output.
+	// This generally only has to be done once, so we make it static.
+	if (!hOut)
+		hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
+	COORD topLeft = { 0, 0 };
+
+	// Figure out the current width and height of the console window
+	if (!GetConsoleScreenBufferInfo(hOut, &csbi)) {
+		// TODO: Handle failure!
+		abort();
+	}
+	DWORD length = csbi.dwSize.X * csbi.dwSize.Y;
+
+	DWORD written;
+
+	// Flood-fill the console with spaces to clear it
+	FillConsoleOutputCharacter(hOut, TEXT(' '), length, topLeft, &written);
+
+	// Reset the attributes of every character to the default.
+	// This clears all background colour formatting, if any.
+	FillConsoleOutputAttribute(hOut, csbi.wAttributes, length, topLeft, &written);
+
+	// Move the cursor back to the top left for the next sequence of writes
+	SetConsoleCursorPosition(hOut, topLeft);
+}
+
 /* Prints error message and aborts program */
 // source: https://www.lemoda.net/c/die/
 void
