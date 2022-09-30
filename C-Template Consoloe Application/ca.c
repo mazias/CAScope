@@ -48,7 +48,12 @@ typedef UINT8 CA_CT; /* memory-type of a cell */
 //typedef cl_uchar CA_CT; /* memory-type of a cell */
 //typedef int CA_CT; /* memory-type of a cell */
 
-int sdmrpt;										// speed-multiplicator-as-power-of-two - 1 means ca runs with speed of half its size (speed=(size/2)*2^(sdmrpt-1)) 
+
+
+CA_CT* ca_space = NULL;								// cell-space
+int ca_space_sz = 1 << 16;
+
+int sdmrpt;											// hash-array - speed-multiplicator-as-power-of-two - 1 means ca runs with speed of half its size (speed=(size/2)*2^(sdmrpt-1)) 
 
 
 typedef struct caDisplaySettings {
@@ -4418,7 +4423,6 @@ CA_MAIN(void) {
 	printf("sim  height %d  width %d\n", sfw.sim_height, sfw.sim_width);
 	pixel_effect_moving_gradient(&sfw);
 
-	int ca_space_sz = 1 << 16;// sfw.sim_width * 1; // 256;
 	int rel_start_speed = 512;
 	int res = 1;				// ca-space-reset
 	int dyrt = 1;				// display-reset
@@ -4789,8 +4793,6 @@ CA_MAIN(void) {
 
 	cr = CA_Rule(cr);
 
-	/* Initial cell-space */
-	CA_CT* ca_space = NULL;
 	// try to load from file
 	CA_CT* nwsc = NULL;										// new space
 	int nwsz = 0;											// new size
@@ -4802,7 +4804,7 @@ CA_MAIN(void) {
 	}
 	// file not found - create cellspace manually
 	else {
-		ca_space = malloc(ca_space_sz * sizeof * ca_space);
+		ca_space = malloc(ca_space_sz * sizeof *ca_space);
 		for (int i = 0; i < ca_space_sz; i++) {
 			ca_space[i] = 0;
 		}
@@ -5219,7 +5221,7 @@ CA_MAIN(void) {
 						free(ca_space);										// free old space
 						ca_space = nwsc;									// set new space as current
 						res = 1;
-						SIMFW_SetFlushMsg(&sfw, "INFO: Setting and cell-space (%.2e bytes) loaded from file.", (double)sizeof(CA_CT) * ca_space_sz);
+						SIMFW_SetFlushMsg(&sfw, "INFO: Settings and cell-space (%.2e bytes) loaded from file.", (double)sizeof(CA_CT) * ca_space_sz);
 					}
 					else {
 						SIMFW_SaveKeyBindings(&sfw, "settings.txt");
@@ -5337,25 +5339,20 @@ CA_MAIN(void) {
 						else
 							// copy the whole current cell-space
 							en = hc_sn;
-						//// connect current ca with empty node
-						//hc_sl++;
-						//hct[hc_sn].uc++;
-						//hct[en].uc++;
-						//HCI hn = HC_find_or_add_branch(hc_sl, hc_sn, en, NULL);
-						//hct[hc_sn].uc--;
-						//hct[en].uc--;
-						//hc_sn = hn;
 						// connect current ca with new (empty or copied) node
 						hc_sl++;
-						hct[en].uc++;	// hc_sn should already have a positive uc
+						hct[en].uc++;
 						HCI hn = HC_find_or_add_branch(hc_sl, hc_sn, en, NULL);
 						hct[en].uc--;
-						//						hct[hc_sn].uc--;
 						hc_sn = hn;
-						//						hct[hc_sn].uc++;
-												//
+
 						ca_space_sz = ca_space_sz * 2;
-						last_ca_space_sz = ca_space_sz;
+						// TODO UGLY hack to avoid allocating memory for possibly very large cell-spaces
+						if (ds.fsme == 2 && ca_space_sz >= 1 << 26) {
+							last_ca_space_sz = ca_space_sz;
+							SIMFW_SetFlushMsg(&sfw, "WARNING  Sync to global cell-space deactivated! You cannot use any other display mode or any functions that access the global cell-space (which are most)!");
+						}
+
 						dyrt = 1;
 					}
 					else if (ctl)
@@ -5374,9 +5371,9 @@ CA_MAIN(void) {
 					else if (cnmd == CM_HASH) {
 						hc_sl--;
 						hc_sn = hct[hc_sn].ln;
-						//
+
 						ca_space_sz = ca_space_sz / 2;
-						last_ca_space_sz = ca_space_sz;
+
 						dyrt = 1;
 					}
 					else if (ctl)
