@@ -48,7 +48,12 @@ typedef UINT8 CA_CT; /* memory-type of a cell */
 //typedef cl_uchar CA_CT; /* memory-type of a cell */
 //typedef int CA_CT; /* memory-type of a cell */
 
-int sdmrpt;										// speed-multiplicator-as-power-of-two - 1 means ca runs with speed of half its size (speed=(size/2)*2^(sdmrpt-1)) 
+
+
+CA_CT* ca_space = NULL;								// cell-space
+uint64_t ca_space_sz = 1 << 16;
+
+int sdmrpt;											// hash-array - speed-multiplicator-as-power-of-two - 1 means ca runs with speed of half its size (speed=(size/2)*2^(sdmrpt-1)) 
 
 
 typedef struct caDisplaySettings {
@@ -118,7 +123,7 @@ typedef struct caBitArray {
 	int mwpt;										// vhba-memory-window in rows/lines - must be power of two! - only by convertBetweenCACTandCABitArray; (each rw wide; should allow memory accesses to stay within fastest cache
 	int rc;											// vhba-row-count (including overlap rows)		(automatically determined by initCAVerticalBitArray)
 	CA_CT* clsc;									// cell-space
-	int scsz;										// cell-space-size in nr of cells
+	uint64_t scsz;									// cell-space-size in nr of cells
 	int brsz;										// cell-space-border-size in nr of cells
 	CA_RULE* cr;									// ca-rule configuration 	
 } caBitArray;
@@ -1163,9 +1168,7 @@ HC_STATS {
 } HC_STATS;
 HC_STATS hc_stats[HCTMXLV] = { 0 };
 
-void HC_print_stats(int crsn) {
-	if (crsn)
-		printf("\33[2J\33[0;0f");
+void HC_print_stats() {
 	// display stats
 	memset(&hc_stats[HCTMXLV - 1], 0, sizeof(hc_stats[HCTMXLV - 1]));	// reset sums
 	printf("-\n");
@@ -1511,7 +1514,7 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 		//	printf("WARNING! Hash-table-size low, seek-count at %d\n", sc);
 		//}
 		// hashtable size to big > abort
-		if (sc >= 255 && ll == ((hct[cm].uc & HCLLMK) >> 24)) {
+		if (sc >= 1 << 10 && ll == ((hct[cm].uc & HCLLMK) >> 24)) {
 			printf("ERROR! Hash-table-size insufficient, ABORTING, seek-count at %d\n", sc);
 			//getch();
 			hc_stats[ll].fc++;							// return some other node that has the same level
@@ -3597,7 +3600,7 @@ lifeanddrawnewcleanzoom(
 	*/
 	CA_RULE* cr,										// ca-rule configuration 
 	CA_CT* sc,											// space 
-	int scsz,											// space-size 
+	uint64_t scsz,											// space-size 
 	int64_t tm,											// time - nr of generations to evolve
 	int res,											// ca-space-reset-flag
 	int dyrt,											// display-reset-flag
@@ -3652,12 +3655,12 @@ lifeanddrawnewcleanzoom(
 	if (ds.fsme == 2 && cnmd != CM_HASH)				// focus-mode can only be in hash-mode when computing-mode is in hash-mode as well
 		ds.fsme = 0;
 
-	int pbs = scsz;										// pixel-buffer-size (one line / space-size div horizontal-zoom)
+	int pbs = 0;										// pixel-buffer-size (one line / space-size div horizontal-zoom)
 	static int last_pbs = 0;
 	if (ds.fsme == 2)
-		pbs >>= HCTBSPT + ds.hdll;
+		pbs = scsz >> (HCTBSPT + ds.hdll);
 	else
-		pbs /= ds.hlzm;
+		pbs = scsz / ds.hlzm;
 	pbs = max(1, pbs);
 	const int stst = 0;									// state shift (nr. of state bits shifted out / disregarded)
 
@@ -4418,7 +4421,6 @@ CA_MAIN(void) {
 	printf("sim  height %d  width %d\n", sfw.sim_height, sfw.sim_width);
 	pixel_effect_moving_gradient(&sfw);
 
-	int ca_space_sz = 1 << 16;// sfw.sim_width * 1; // 256;
 	int rel_start_speed = 512;
 	int res = 1;				// ca-space-reset
 	int dyrt = 1;				// display-reset
@@ -4784,14 +4786,12 @@ CA_MAIN(void) {
 	/* Control-Mode */
 	enum CLMD { CLMD_NONE, CLMD_RULE, CLMD_SCREEN } clmd = CLMD_NONE;
 
+	ca_space_sz = max(128, ca_space_sz);
 
 	int pitch = 0;
-
 	cr = CA_Rule(cr);
 
-	/* Initial cell-space */
-	CA_CT* ca_space = NULL;
-	// try to load from file
+	// try to load cell-space from file
 	CA_CT* nwsc = NULL;										// new space
 	int nwsz = 0;											// new size
 	nwsc = CA_LoadFromFile("cellspace.bin", &nwsz);
@@ -4802,7 +4802,7 @@ CA_MAIN(void) {
 	}
 	// file not found - create cellspace manually
 	else {
-		ca_space = malloc(ca_space_sz * sizeof * ca_space);
+		ca_space = malloc(ca_space_sz * sizeof *ca_space);
 		for (int i = 0; i < ca_space_sz; i++) {
 			ca_space[i] = 0;
 		}
@@ -4831,7 +4831,7 @@ CA_MAIN(void) {
 		SDL_Event e;
 		int fscd = 0;									// focus (hlfs, vlfs, vlzm, hlzm) has been changed
 		int64_t org_speed = speed;
-		int last_ca_space_sz = ca_space_sz;
+		uint64_t last_ca_space_sz = ca_space_sz;
 		while (SDL_PollEvent(&e)) {
 			const UINT8* kbst = SDL_GetKeyboardState(NULL); /* keyboard state */
 			SDL_Keymod kbms = SDL_GetModState(); /* keyboard mod state */
@@ -5219,7 +5219,7 @@ CA_MAIN(void) {
 						free(ca_space);										// free old space
 						ca_space = nwsc;									// set new space as current
 						res = 1;
-						SIMFW_SetFlushMsg(&sfw, "INFO: Setting and cell-space (%.2e bytes) loaded from file.", (double)sizeof(CA_CT) * ca_space_sz);
+						SIMFW_SetFlushMsg(&sfw, "INFO: Settings and cell-space (%.2e bytes) loaded from file.", (double)sizeof(CA_CT) * ca_space_sz);
 					}
 					else {
 						SIMFW_SaveKeyBindings(&sfw, "settings.txt");
@@ -5337,25 +5337,24 @@ CA_MAIN(void) {
 						else
 							// copy the whole current cell-space
 							en = hc_sn;
-						//// connect current ca with empty node
-						//hc_sl++;
-						//hct[hc_sn].uc++;
-						//hct[en].uc++;
-						//HCI hn = HC_find_or_add_branch(hc_sl, hc_sn, en, NULL);
-						//hct[hc_sn].uc--;
-						//hct[en].uc--;
-						//hc_sn = hn;
 						// connect current ca with new (empty or copied) node
 						hc_sl++;
-						hct[en].uc++;	// hc_sn should already have a positive uc
+						hct[en].uc++;
 						HCI hn = HC_find_or_add_branch(hc_sl, hc_sn, en, NULL);
 						hct[en].uc--;
-						//						hct[hc_sn].uc--;
 						hc_sn = hn;
-						//						hct[hc_sn].uc++;
-												//
+
 						ca_space_sz = ca_space_sz * 2;
+<<<<<<< HEAD
 						last_ca_space_sz = ca_space_sz;			// do not resize (byte-based) ca-space immediately as ca_space_sz can get very big in hash mode
+=======
+						// TODO UGLY hack to avoid allocating memory for possibly very large cell-spaces
+						if (ds.fsme == 2 && ca_space_sz >= 1 << 26) {
+							last_ca_space_sz = ca_space_sz;
+							SIMFW_SetFlushMsg(&sfw, "WARNING  Sync to global cell-space deactivated! You cannot use any other display mode or any functions that access the global cell-space (which are most)!");
+						}
+
+>>>>>>> 1be4f517284533bf7220321efd1cfa3c0c7dce13
 						dyrt = 1;
 					}
 					else if (ctl)
@@ -5374,9 +5373,18 @@ CA_MAIN(void) {
 					else if (cnmd == CM_HASH) {
 						hc_sl--;
 						hc_sn = hct[hc_sn].ln;
-						//
+
 						ca_space_sz = ca_space_sz / 2;
+<<<<<<< HEAD
 						last_ca_space_sz = ca_space_sz;			// do not resize (byte-based) ca-space immediately as ca_space_sz can get very big in hash mode
+=======
+						// TODO UGLY hack to avoid allocating memory for possibly very large cell-spaces
+						if (ds.fsme == 2 && ca_space_sz >= 1 << 26) {
+							last_ca_space_sz = ca_space_sz;
+							SIMFW_SetFlushMsg(&sfw, "WARNING  Sync to global cell-space deactivated! You cannot use any other display mode or any functions that access the global cell-space (which are most)!");
+						}
+
+>>>>>>> 1be4f517284533bf7220321efd1cfa3c0c7dce13
 						dyrt = 1;
 					}
 					else if (ctl)
@@ -5507,7 +5515,7 @@ CA_MAIN(void) {
 				/* CA-space-size has been changed */
 				if (ca_space_sz != last_ca_space_sz) {
 					printf("ca-space-resize  new %d  old %d\n", ca_space_sz, last_ca_space_sz);
-					int nwsz = ca_space_sz;
+					uint64_t nwsz = ca_space_sz;
 					CA_CT* nwsc = NULL;									// new space
 					nwsc = malloc(nwsz * sizeof * nwsc);				// memory allocation for new space
 					if (!nwsc)
@@ -5520,7 +5528,6 @@ CA_MAIN(void) {
 							max(nwsc, nwsc + (nwsz - last_ca_space_sz) / 2),
 							max(ca_space, ca_space + (last_ca_space_sz - nwsz) / 2),
 							min(nwsz, last_ca_space_sz));
-
 
 						free(ca_space);										// release memory of old space
 
@@ -5578,8 +5585,13 @@ CA_MAIN(void) {
 		static uint64_t fpstm = 0;
 		double trdn = timeit_duration_nr(fpstr);		// fps-timer-duration
 		if (trdn >= 1.0) {
+			static int fccls = 1;
 			if (cnmd == CM_HASH) {
-				HC_print_stats(1);
+				if (fccls)
+					SIMFW_ConsoleCLS();
+				fccls = 0;
+				SIMFW_ConsoleSetCursorPosition(0, 0);
+				HC_print_stats();
 				for (int i = 0; i < HCTMXLV - 2; i++) {
 					hc_stats[i].fc = 0;
 					hc_stats[i].rcct = 0;
@@ -5588,6 +5600,8 @@ CA_MAIN(void) {
 					hc_stats[i].ss = 0;
 				}
 			}
+			else
+				fccls = 1;
 			double ds;
 			if (cnmd == CM_HASH) {
 				if (sdmrpt)

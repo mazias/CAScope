@@ -1,14 +1,13 @@
 /* This file was automatically generated.  Do not edit! */
-void SIMFW_TestBlockMemoryLayout();
-void diffuse_line_memory(UINT32 *bmv);
-void diffuse_block_memory(UINT32 *bmv);
-void copy_block_overlap(int *OLCP,UINT32 *bmv);
+void SIMFW_Test_Mandelbrot();
+__inline double random01();
+void SIMFW_Test();
 typedef struct tagSIMFW tagSIMFW;
 typedef struct tagSIMFW_KeyBinding tagSIMFW_KeyBinding;
 struct tagSIMFW_KeyBinding {
 	const char *name;					// should not contain white-space
 	const char *description;
-	const char* const* value_strings;				// pointer to array of strings - when not null it MUST hold a value for all indizes from min to max
+	const char* const* value_strings;				// pointer to array of strings - MUST hold a value for all indizes from min to max (or be null)
 	//double *dbl_var;
 	//int *int_var;
 	int slct_key;
@@ -47,12 +46,6 @@ struct tagSIMFW {
 	int key_bindings_count;
 };
 typedef struct tagSIMFW SIMFW;
-void display_block_memory_with_border(SIMFW *simfw,int syzb,int sxzb,int b1zp,UINT32 *mbc);
-void display_block_memory(SIMFW *simfw,int syzb,int sxzb,int b1zp,UINT32 *mbc);
-void display_linear_memory(SIMFW *simfw,int syzp,int sxzp,UINT32 *lmv);
-void SIMFW_Test_Mandelbrot();
-__inline double random01();
-void SIMFW_Test();
 void pixel_effect_moving_gradient(SIMFW *simfw);
 void pixel_effect_prototype_while(SIMFW *simfw);
 void SIMFW_Scroll(SIMFW *sfw,int sy,int sx);
@@ -77,4 +70,6 @@ Uint32 SIMFW_GetMouseState(SIMFW *sfw,int *y,int *x);
 void SIMFW_SetSimSize(SIMFW *simfw,int height,int width);
 void SIMFW_DbgMsg(const char *format,...);
 void SIMFW_Die(const char *format,...);
+void SIMFW_ConsoleCLS();
+void SIMFW_ConsoleSetCursorPosition(int x,int y);
 #define INTERFACE 0
