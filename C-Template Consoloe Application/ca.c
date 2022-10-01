@@ -5355,7 +5355,7 @@ CA_MAIN(void) {
 						//						hct[hc_sn].uc++;
 												//
 						ca_space_sz = ca_space_sz * 2;
-						last_ca_space_sz = ca_space_sz;
+						last_ca_space_sz = ca_space_sz;			// do not resize (byte-based) ca-space immediately as ca_space_sz can get very big in hash mode
 						dyrt = 1;
 					}
 					else if (ctl)
@@ -5376,7 +5376,7 @@ CA_MAIN(void) {
 						hc_sn = hct[hc_sn].ln;
 						//
 						ca_space_sz = ca_space_sz / 2;
-						last_ca_space_sz = ca_space_sz;
+						last_ca_space_sz = ca_space_sz;			// do not resize (byte-based) ca-space immediately as ca_space_sz can get very big in hash mode
 						dyrt = 1;
 					}
 					else if (ctl)
