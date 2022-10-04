@@ -3365,18 +3365,47 @@ display_2d_matze(
 	// Linear-Memory-Layout
 	if (md == 0) {
 		if (!mdpm) {
-			int sz = ceil(sqrt(pbs));
-			for (int v = 0; v < sz * vlpzplw; v += vlpzplw)
-				for (int h = v; h < v + sz * hlpz; h += hlpz) {
-					UINT32* pnc = pnv + rpnc + h;					// pixel-screen current element
-					if (pnc >= pnv && pnc < pni)
-						for (int vv = 0; vv < vlpzplw; vv += plw)
-							for (int hh = 0; hh < hlpz; ++hh)
-								pnc[vv + hh] = *pbc;
+			if (vlpz < 2 && hlpz < 2) {
+				int b, bh, bv;
+				_BitScanForward(&b, pbs);
+				bh = bv = b >> 1;
+				if (pbs > 1 << (bh + bv))
+					bh++;
+				if (pbs > 1 << (bh + bv))
+					bv++;
+				bh = 1 << bh;
+				bv = 1 << bv;
+//printf("pbs %d  %d  %d  %d\n", pbs, b, bh, bv);
+				UINT32* pnc = pnv + rpnc;								// pixel-screen current element
+				UINT32* pneol = min(pnc + bh, pnc + (pbi - pbc));		// pixel-screen end of current line
+				while (1) {
+					*pnc = *pbc;
+					++pnc;
 					++pbc;
-					if (pbc >= pbi)
-						return;
+					if (pnc == pneol) {
+						if (pbc >= pbi)
+							return;
+						pnc += plw - bh;
+						pneol = min(pni, min(pnc + bh, pnc + (pbi - pbc)));
+						if (pnc >= pni)
+							return;
+					}
 				}
+			}
+			else {
+				int sz = ceil(sqrt(pbs));
+				for (int v = 0; v < sz * vlpzplw; v += vlpzplw)
+					for (int h = v; h < v + sz * hlpz; h += hlpz) {
+						UINT32* pnc = pnv + rpnc + h;					// pixel-screen current element
+						if (pnc >= pnv && pnc < pni)
+							for (int vv = 0; vv < vlpzplw; vv += plw)
+								for (int hh = 0; hh < hlpz; ++hh)
+									pnc[vv + hh] = *pbc;
+						++pbc;
+						if (pbc >= pbi)
+							return;
+					}
+			}
 		}
 		else {
 			int cs = pbi - pbv;
@@ -5345,16 +5374,11 @@ CA_MAIN(void) {
 						hc_sn = hn;
 
 						ca_space_sz = ca_space_sz * 2;
-<<<<<<< HEAD
-						last_ca_space_sz = ca_space_sz;			// do not resize (byte-based) ca-space immediately as ca_space_sz can get very big in hash mode
-=======
 						// TODO UGLY hack to avoid allocating memory for possibly very large cell-spaces
 						if (ds.fsme == 2 && ca_space_sz >= 1 << 26) {
 							last_ca_space_sz = ca_space_sz;
 							SIMFW_SetFlushMsg(&sfw, "WARNING  Sync to global cell-space deactivated! You cannot use any other display mode or any functions that access the global cell-space (which are most)!");
 						}
-
->>>>>>> 1be4f517284533bf7220321efd1cfa3c0c7dce13
 						dyrt = 1;
 					}
 					else if (ctl)
@@ -5375,16 +5399,11 @@ CA_MAIN(void) {
 						hc_sn = hct[hc_sn].ln;
 
 						ca_space_sz = ca_space_sz / 2;
-<<<<<<< HEAD
-						last_ca_space_sz = ca_space_sz;			// do not resize (byte-based) ca-space immediately as ca_space_sz can get very big in hash mode
-=======
 						// TODO UGLY hack to avoid allocating memory for possibly very large cell-spaces
 						if (ds.fsme == 2 && ca_space_sz >= 1 << 26) {
 							last_ca_space_sz = ca_space_sz;
 							SIMFW_SetFlushMsg(&sfw, "WARNING  Sync to global cell-space deactivated! You cannot use any other display mode or any functions that access the global cell-space (which are most)!");
 						}
-
->>>>>>> 1be4f517284533bf7220321efd1cfa3c0c7dce13
 						dyrt = 1;
 					}
 					else if (ctl)
