@@ -1423,7 +1423,7 @@ display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 pv, int pll, HC
 	//printf("%d %d, ", ll, pll);
 	while (ll <= pll) {
 		if (hddh >= 0) {
-			if (ll >= hddh + hdll)
+			if (ll <= hc_sl - (hddh + hdll))
 				v += (hct[n].uc & HCUCMK);
 		}
 		else {
@@ -3447,6 +3447,9 @@ display_2d_matze(
 		sy = h / 2 - ysz * vlpz / 2,
 		sx = paw / 2 - xsz * hlpz / 2,
 		cr = sy * plw + sx;										// transpose needed to center
+	if (cr < 0) {
+		cr = 0;	// TODO center
+	}
 	int vlpzplw = vlpz * plw;									// pre-calc vlpz * plw
 	int rpnc = cr;												// pixel-screen position (relative, no pointer)
 	pni -= plw * (vlpz - 1) + (hlpz - 1);						// correct pixel-screen first invalid for pixel-zoom (so we dont have to check for every zoomed pixel)
@@ -3465,19 +3468,20 @@ display_2d_matze(
 				bh = 1 << bh;
 				bv = 1 << bv;
 //printf("pbs %d  %d  %d  %d\n", pbs, b, bh, bv);
-				UINT32* pnc = pnv + rpnc;								// pixel-screen current element
-				UINT32* pneol = min(pnc + bh, pnc + (pbi - pbc));		// pixel-screen end of current line
+				UINT32* pnc = pnv + rpnc - plw + bh;					// pixel-screen current element
+				UINT32* pneol = pnc;									// pixel-screen end of current line
 				while (1) {
-					*pnc = *pbc;
-					++pnc;
-					++pbc;
-					if (pnc == pneol) {
-						if (pbc >= pbi)
-							return;
+					if (pnc >= pneol) {
 						pnc += plw - bh;
-						pneol = min(pni, min(pnc + bh, pnc + (pbi - pbc)));
-						if (pnc >= pni)
+						if (pbc >= pbi || pnc >= pni)
 							return;
+						pneol = min(pni, min(pnc + bh, pnc + (pbi - pbc) - 1));
+						//printf("pbc %p  pbi %p  pnc %p  pni %p  pneol %p\n", pbc, pbi, pnc, pni, pneol);
+					} 
+					else {
+						*pnc = *pbc;
+						++pnc;
+						++pbc;
 					}
 				}
 			}
@@ -5625,7 +5629,7 @@ CA_MAIN(void) {
 					dyrt = 1;
 
 				/* CA-space-size has been changed */
-				if (ca_space_sz != last_ca_space_sz) {
+				if (ca_space_sz != last_ca_space_sz && cnmd != CM_HASH) {
 					printf("ca-space-resize  new %d  old %d\n", ca_space_sz, last_ca_space_sz);
 					uint64_t nwsz = ca_space_sz;
 					CA_CT* nwsc = NULL;									// new space
@@ -5643,7 +5647,7 @@ CA_MAIN(void) {
 
 						free(ca_space);										// release memory of old space
 
-						speed = speed * 1.0 * nwsz / last_ca_space_sz;
+						speed = max(1, speed * 1.0 * nwsz / last_ca_space_sz);
 
 						ca_space_sz = last_ca_space_sz = nwsz;				// remember new size
 						ca_space = nwsc;									// set new space as current
