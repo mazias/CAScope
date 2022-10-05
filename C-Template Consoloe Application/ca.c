@@ -1403,60 +1403,60 @@ UINT32* old_display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, 
 
 	return pbf;
 }
+
+//__declspec(noinline)
 UINT32* 
 display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 pv, int pll, HCI n, UINT32* pmxv, UINT32* pmnv) {
 //	printf("xxx");
 	int hpn[HCTMXLV] = { 0 };		// heap-node
-	int hplnd[HCTMXLV] = { 0 };		// heap-left-node-done
+	char hplnd[HCTMXLV] = { 0 };		// heap-left-node-done
 	int hpv[HCTMXLV] = { 0 };		// heap-value
 	UINT32 v = pv;
 	UINT32 ll = pll;
+
+	int hddh = ds.hddh;
+	int hdll = ds.hdll;
 
 	UINT32 mxv; UINT32 mnv;
 	mxv = 0;
 	mnv = MAXUINT32;
 	//printf("%d %d, ", ll, pll);
 	while (ll <= pll) {
-		if (ds.hddh >= 0)
-			if (ll >= ds.hddh + ds.hdll)
+		if (hddh >= 0) {
+			if (ll >= hddh + hdll)
 				v += (hct[n].uc & HCUCMK);
-		else
-			if (ll == ds.hddh * -1 - 1 + ds.hdll)
+		}
+		else {
+			if (ll == hddh * -1 - 1 + hdll)
 				v += hct[n].uc& HCUCMK;
+		}
 
-		if (ll <= ds.hdll) {
+		if (ll <= hdll) {
 			if (v > mxv)
 				mxv = v;
 			if (v < mnv)
 				mnv = v;
 
 			*pbf = v;
-
-			//
-			ll++;
-			while (!hplnd[ll]) {
-				ll++;
-				//if (ll > pll) {
-				//	pbf = pbi - 1;
-				//	goto ow;
-				//}
-			}
-			n = hpn[ll];
-			v = hpv[ll];
-
-			//
 			++pbf;
 			if (pbf >= pbi) {
 				pbf = pbi - 1;
 				break;
 			}
+
+			//
+			ll++;
+			while (!hplnd[ll])
+				ll++;
+			n = hpn[ll];
+			v = hpv[ll];
 		}
 
 
 		if (!hplnd[ll]) {
+			hplnd[ll] = 1;
 			hpn[ll] = n;
 			hpv[ll] = v;
-			hplnd[ll] = 1;
 			n = hct[n].ln;
 			ll--;
 		}
@@ -1467,7 +1467,6 @@ display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 pv, int pll, HC
 		}
 
 	}
-	ow:
 
 	*pmnv = mnv;
 	*pmxv = mxv;
@@ -4079,14 +4078,8 @@ lifeanddrawnewcleanzoom(
 
 		if (de) {
 			if (ds.fsme == 2 && cnmd == CM_HASH) {
-				UINT32 v = 1;
-				//v = FNV1_32_INIT;
-
 				UINT32 mxv = 0;	// max v
 				UINT32 mnv = 0;	// min v
-				///float v = 1.0;
-				///float mxv = 0.0;	// max v
-				///float mnv = 0.0;	// min v
 
 				// Color-table.
 #define CRTLSZ	(1 << 10)
@@ -4096,34 +4089,37 @@ lifeanddrawnewcleanzoom(
 						crtl[i] = getColor((double)i / (CRTLSZ - 1.0), ds.cm, ds.crct, ds.gm);
 				}
 
-				//HC_clear_uc_stats(hc_sl, hc_sn);
-				//HC_update_uc_stats(hc_sl, hc_sn);
+				display_hash_array(pbv, pbv, pbi, 1, hc_sl, hc_sn, &mxv, &mnv);
 
-				display_hash_array(pbv, pbv, pbi, v, hc_sl, hc_sn, &mxv, &mnv);
 
-				// 				printf("mxv %u  mnv %u\n", mxv, mnv);
-				// 				printf("mxv %e  mnv %e\n", (double)mxv, (double)mnv);
-
-#define LOGPRECISION 8
+#define LOGPRECISION 4
 #define LOGSCALE (1U<<LOGPRECISION)
 
 				double mnvlg = log2((double)mnv);
 				double vlgrg = max(1.0, log2((double)mxv) - mnvlg);
 				mxv = mxv - mnv;
 
+				double v;
+				UINT32 lpbc = 17, lcol = 1;
 				for (UINT32* pbc = pbv; pbc < pbi; pbc++) {
-					double v;
-					if (0) {
-						v = (double)*pbc / (double)0xFFFFFFFF;
+					if (*pbc == lpbc)
+						*pbc = lcol;
+					else {
+						if (*pbc == mnv)
+							v = 0.0;
+						else if (*pbc == mxv)
+							v = 1.0;
+						else if (ds.lgm) {
+							//printf("%.2e  %.2e\n", (((double)log2fix(*pbc* LOGSCALE, LOGPRECISION)) / LOGSCALE), log2((double)*pbc));
+							v = ((((double)log2fix(*pbc * LOGSCALE, LOGPRECISION)) / LOGSCALE) - mnvlg) / vlgrg;
+							//v = (log2((double)*pbc) - mnvlg) / vlgrg;
+						}
+						else
+							v = ((double)*pbc - (double)mnv) / (double)mxv;
+						lpbc = *pbc;
+						*pbc = crtl[(int)(v * (CRTLSZ - 1) + .5)];
+						lcol = *pbc;
 					}
-					else if (ds.lgm) {
-//						printf("%.2e  %.2e\n", (((double)log2fix(*pbc* LOGSCALE, LOGPRECISION)) / LOGSCALE), log2((double)*pbc));
-						v = ((((double)log2fix(*pbc * LOGSCALE, LOGPRECISION)) / LOGSCALE) - mnvlg) / vlgrg;
-//						v = (log2((double)*pbc) - mnvlg) / vlgrg;
-					}
-					else
-						v = ((double)*pbc - (double)mnv) / (double)mxv;
-					*pbc = crtl[(int)(v * (CRTLSZ - 1) + .5)];
 				}
 			}
 			else {
