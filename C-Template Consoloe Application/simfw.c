@@ -238,6 +238,8 @@ SIMFW_DisplayKeyBindings(SIMFW *sfw) {
 			sprintf_s(val, sizeof(val), "%s", kb->value_strings[*(int*)kb->val]);
 		else if (kb->val_type == KBVT_INT)
 			sprintf_s(val, sizeof(val), "%5d", *(int*)kb->val);
+		else if (kb->val_type == KBVT_INT64)
+			sprintf_s(val, sizeof(val), "%5I64d", *(int*)kb->val);
 		else if (kb->val_type == KBVT_DOUBLE)
 			sprintf_s(val, sizeof(val), "%.3f", *(double*)kb->val);
 		j += sprintf_s(buffer + j, sizeof(buffer) - j, "% 4s % 8s  %s %s\n", SDL_GetKeyName(kb->slct_key), val, kb->name, kb->description);
@@ -333,6 +335,8 @@ SIMFW_SaveKeyBindings(SIMFW *sfw, const char *filename) {
 				fprintf_s(stream, "%s = %.20le\n", kb->name, *(double*)kb->val);
 			if (kb->val_type == KBVT_INT)
 				fprintf_s(stream, "%s = %d\n", kb->name, *(int*)kb->val);
+			if (kb->val_type == KBVT_INT64)
+				fprintf_s(stream, "%s = %I64d\n", kb->name, *(int64_t*)kb->val);
 
 			SIMFW_DbgMsg("saved %s", kb->name);
 
@@ -380,7 +384,15 @@ SIMFW_LoadKeyBindings(SIMFW *sfw, const char *filename) {
 							*(int*)kb->val = val;
 							SIMFW_DbgMsg("load  %s = %d\n", name, val);
 						}
-					}					
+					}
+					else if (kb->val_type == KBVT_INT64) {
+						int64_t val;
+						nvr = fscanf_s(stream, "%I64d\n", &val);
+						if (nvr == 1) {
+							*(int64_t*)kb->val = val;
+							SIMFW_DbgMsg("load  %s = %I64d\n", name, val);
+						}
+					}
 				}
 				kb++;
 			}
@@ -456,7 +468,8 @@ keybinding_selected:
 		double ov;	// original value
 		/* Load current value */
 		if (slkb->val_type == KBVT_DOUBLE)	cv = *(double*)	slkb->val;
-		if (slkb->val_type == KBVT_INT)		cv = *(int*)	slkb->val;
+		if (slkb->val_type == KBVT_INT)		cv = *(int*)slkb->val;
+		if (slkb->val_type == KBVT_INT64)	cv = *(int64_t*)	slkb->val;
 		ov = cv;
 		/* Direction (up or down) of change */
 		int dir = 0;
@@ -522,7 +535,8 @@ keybinding_selected:
 		SIMFW_SetFlushMsg(sfw, "%s  %s   %s\nval  %s%e  %f  1/%e\n[%.2e-%.2e; %.2e]", action, slkb->name, slkb->description, vs, cv, cv, 1.0 / cv, slkb->min, slkb->max, slkb->step);
 		/* Save current value */
 		if (slkb->val_type == KBVT_DOUBLE)	*(double*)slkb->val	= cv;
-		if (slkb->val_type == KBVT_INT)		*(int*)slkb->val	= cv;
+		if (slkb->val_type == KBVT_INT)		*(int*)slkb->val = cv;
+		if (slkb->val_type == KBVT_INT64)	*(int64_t*)slkb->val = cv;
 	}
 }
 
