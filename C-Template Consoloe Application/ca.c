@@ -1200,7 +1200,7 @@ void HC_print_stats() {
 			sd.ss = hc_stats[HCTMXLV - 1].ss - sl.ss;
 			hc_stats[HCTMXLV - 2] = sd;
 			sl = hc_stats[HCTMXLV - 1];
-			printf("=== DELTA91s\n", "");
+			printf("=== DELTA%91s\n", "");
 		}
 		else
 			printf("=== SUM%93s\n", "");
@@ -4078,44 +4078,52 @@ lifeanddrawnewcleanzoom(
 
 		if (de) {
 			if (ds.fsme == 2 && cnmd == CM_HASH) {
-				UINT32 mxv = 0;	// max v
-				UINT32 mnv = 0;	// min v
+				#define CRTLSZ (1 << 10)
+				#define LOGPRECISION 4
+				#define LOGSCALE (1U<<LOGPRECISION)
+
+				unsigned int lgmd = ds.lgm;										// log-mode
 
 				// Color-table.
-#define CRTLSZ	(1 << 10)
 				static UINT32 crtl[CRTLSZ] = { 0 };
-				if (dyrt) {
+				if (dyrt)
 					for (int i = 0; i < CRTLSZ; i++)
 						crtl[i] = getColor((double)i / (CRTLSZ - 1.0), ds.cm, ds.crct, ds.gm);
-				}
+
+				//
+				UINT32 mxv = 0;													// max v
+				UINT32 mnv = 0;													// min v
+				UINT32 rgv = 1;													// range v
 
 				display_hash_array(pbv, pbv, pbi, 1, hc_sl, hc_sn, &mxv, &mnv);
+				
+				rgv = mxv - mnv;
+				//double mnlgv = log2((double)mnv);
+				//double mxlgv = log2((double)mxv);
+				double mnlgv;
+				double mxlgv;
+				double rglgv;
+				if (lgmd) {
+					mnlgv = (double)(log2fix(mnv << LOGPRECISION, LOGPRECISION)) / LOGSCALE;
+					mxlgv = (double)(log2fix(mxv << LOGPRECISION, LOGPRECISION)) / LOGSCALE;
+					rglgv = max(1.0, mxlgv - mnlgv);
+				}
 
-
-#define LOGPRECISION 4
-#define LOGSCALE (1U<<LOGPRECISION)
-
-				double mnvlg = log2((double)mnv);
-				double vlgrg = max(1.0, log2((double)mxv) - mnvlg);
-				mxv = mxv - mnv;
+				//printf("mnv %u  mxv %u   fxlgmnv %f  fxlgmxv %f   lgmnv %f  lgmxv %f\n", mnv, mxv, mnlgv, mxlgv, log2(mnv), log2(mxv));
 
 				double v;
-				UINT32 lpbc = 17, lcol = 1;
+				UINT32 lpbc = *pbc + 1, lcol = 0;
 				for (UINT32* pbc = pbv; pbc < pbi; pbc++) {
 					if (*pbc == lpbc)
 						*pbc = lcol;
 					else {
-						if (*pbc == mnv)
-							v = 0.0;
-						else if (*pbc == mxv)
-							v = 1.0;
-						else if (ds.lgm) {
+						if (lgmd) {
 							//printf("%.2e  %.2e\n", (((double)log2fix(*pbc* LOGSCALE, LOGPRECISION)) / LOGSCALE), log2((double)*pbc));
-							v = ((((double)log2fix(*pbc * LOGSCALE, LOGPRECISION)) / LOGSCALE) - mnvlg) / vlgrg;
-							//v = (log2((double)*pbc) - mnvlg) / vlgrg;
+							v = ((((double)log2fix(*pbc << LOGPRECISION, LOGPRECISION)) / LOGSCALE) - mnlgv) / rglgv;
+							//v = (log2((double)*pbc) - mnlgv) / rglgv;
 						}
 						else
-							v = ((double)*pbc - (double)mnv) / (double)mxv;
+							v = ((double)*pbc - (double)mnv) / (double)rgv;
 						lpbc = *pbc;
 						*pbc = crtl[(int)(v * (CRTLSZ - 1) + .5)];
 						lcol = *pbc;
@@ -5124,6 +5132,7 @@ CA_MAIN(void) {
 					if (cnmd == CM_HASH) {
 						//assert(HCTBSPT == 2 && "HCTBSPT must be 2"); // TODO why does this not compile???
 						int rs = HCTBS * ipow(2, min(hc_sl, keysym - SDLK_0));				// random size in nr. of cells
+						SIMFW_SetFlushMsg(&sfw, "hash-cells random size  %d  (use ctl to select leftmost node)\n", rs);
 						memset(&hcls, 0, sizeof(hcls));				// reset hash-cells-set (even if this probably may not be necesary)
 						// create a random hash-node of given size
 						HCI rmnd;									// last-node
@@ -5170,11 +5179,9 @@ CA_MAIN(void) {
 							hct[tcn].uc--;
 							//
 						}
-						//						hct[hc_sn].uc--;
+						// hct[hc_sn].uc--;
 						hc_sn = cn;
-						//						hct[hc_sn].uc++;
-												//
-						SIMFW_SetFlushMsg(&sfw, "hash-cells random size  %d  (use ctl to select leftmost node)\n", rs);
+						// hct[hc_sn].uc++;
 					}
 					else {
 						tm = 0;
