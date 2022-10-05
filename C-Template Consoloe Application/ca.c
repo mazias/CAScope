@@ -1417,18 +1417,12 @@ display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 pv, int pll, HC
 	mnv = MAXUINT32;
 	//printf("%d %d, ", ll, pll);
 	while (ll <= pll) {
-		//printf("%d %d\n", ll, pll);
-		//if (rand() % 1000 == 99)
-		//	break;
-
-		if (ds.hddh >= 0) {
+		if (ds.hddh >= 0)
 			if (ll >= ds.hddh + ds.hdll)
 				v += (hct[n].uc & HCUCMK);
-		}
-		else {
+		else
 			if (ll == ds.hddh * -1 - 1 + ds.hdll)
 				v += hct[n].uc& HCUCMK;
-		}
 
 		if (ll <= ds.hdll) {
 			if (v > mxv)
@@ -1458,9 +1452,10 @@ display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 pv, int pll, HC
 			}
 		}
 
-		hpn[ll] = n;
-		hpv[ll] = v;
+
 		if (!hplnd[ll]) {
+			hpn[ll] = n;
+			hpv[ll] = v;
 			hplnd[ll] = 1;
 			n = hct[n].ln;
 			ll--;
@@ -4122,25 +4117,12 @@ lifeanddrawnewcleanzoom(
 						v = (double)*pbc / (double)0xFFFFFFFF;
 					}
 					else if (ds.lgm) {
-						//	//							v = (log2((double)*pbc) - mnvlg) / vlgrg;
-						//	//v = ((double)(log2fix(*pbc * LOGSCALE, LOGPRECISION) / LOGSCALE) - mnvlg) / vlgrg;
-						//	DWORD wv;
-						//	_BitScanReverse(&wv, *pbc);
-						//	v = min(1.0, (wv - mnvlg) / vlgrg);
-						//	//if (!pcg32_boundedrand(100000)) printf("v  %u %u %u  fix  %f  dbl %f\n", *pbc, LOGSCALE, *pbc * LOGSCALE, vf, (log2((double)*pbc) - mnvlg) / vlgrg);
-						v = (log2((double)*pbc) - mnvlg) / vlgrg;
+//						printf("%.2e  %.2e\n", (((double)log2fix(*pbc* LOGSCALE, LOGPRECISION)) / LOGSCALE), log2((double)*pbc));
+						v = ((((double)log2fix(*pbc * LOGSCALE, LOGPRECISION)) / LOGSCALE) - mnvlg) / vlgrg;
+//						v = (log2((double)*pbc) - mnvlg) / vlgrg;
 					}
 					else
 						v = ((double)*pbc - (double)mnv) / (double)mxv;
-					///						v = ((double)(*(float*)pbc) - (double)mnv) / (double)mxv;
-											//v = (log2((double)(*(float*)pbc)) - mnvlg) / vlgrg;
-
-										//if (!pcg32_boundedrand(100000)) printf("col %.4f\n", v);
-																//UINT32 c;
-																//c = getColor(v, ds.cm, ds.crct, ds.gm);
-																//UINT32 gv = 255.0 - 255.0 * v;
-																//c = gv<<16 | gv<<8 | gv;
-
 					*pbc = crtl[(int)(v * (CRTLSZ - 1) + .5)];
 				}
 			}
