@@ -2,111 +2,103 @@
 <CodeBlocks_project_file>
 	<FileVersion major="1" minor="6" />
 	<Project>
-		<Option title="t2" />
+		<Option title="CAScope" />
 		<Option pch_mode="2" />
 		<Option compiler="gcc" />
 		<Build>
-			<Target title="Debug Win32">
-				<Option output="C-Template Consoloe Application" prefix_auto="1" extension_auto="1" />
-				<Option type="0" />
-				<Option compiler="gcc" />
-				<Compiler>
-					<Add option="-DWIN32" />
-					<Add option="-D_DEBUG" />
-					<Add option="-D_CONSOLE" />
-					<Add option="-D_LIB" />
-					<Add directory="../../_INCLUDES/SDL2_ttf-2.0.12 Visual Studio/include" />
-					<Add directory="../../_INCLUDES/SDL2-2.0.3 MinGW/include" />
-					<Add directory="$(IncludePath)" />
-				</Compiler>
-				<Linker>
-					<Add library="SDL2.lib" />
-					<Add library="SDL2main.lib" />
-					<Add library="SDL2_ttf.lib" />
-					<Add directory="../../_INCLUDES/SDL2_ttf-2.0.12 Visual Studio/lib/x86" />
-					<Add directory="../../_INCLUDES/SDL2-2.0.3 MinGW/lib/x86" />
-					<Add directory="$(LibraryPath)" />
-				</Linker>
-			</Target>
-			<Target title="Debug x64">
-				<Option output="C-Template Consoloe Application" prefix_auto="1" extension_auto="1" />
-				<Option type="0" />
-				<Option compiler="gcc" />
-				<Compiler>
-					<Add option="-DWIN32" />
-					<Add option="-D_DEBUG" />
-					<Add option="-D_CONSOLE" />
-					<Add option="-D_LIB" />
-					<Add directory="../../_INCLUDES/SDL2_ttf-2.0.12 Visual Studio/include" />
-					<Add directory="../../_INCLUDES/SDL2-2.0.3 Visual Studio/include" />
-					<Add directory="$(IncludePath)" />
-				</Compiler>
-				<Linker>
-					<Add library="SDL2.lib" />
-					<Add library="SDL2main.lib" />
-					<Add library="SDL2_ttf.lib" />
-					<Add directory="../../_INCLUDES/SDL2_ttf-2.0.12 Visual Studio/lib/x86" />
-					<Add directory="../../_INCLUDES/SDL2-2.0.3 Visual Studio/lib/x86" />
-					<Add directory="$(LibraryPath)" />
-				</Linker>
-			</Target>
 			<Target title="Release x64">
-				<Option output="C-Template Consoloe Application" prefix_auto="1" extension_auto="1" />
-				<Option type="0" />
+				<Option output="../Release-x64-CodeBlocks/CAScope" prefix_auto="1" extension_auto="1" />
+				<Option working_dir="../Release-x64-CodeBlocks/" />
+				<Option object_output="../Release-x64-CodeBlocks/" />
+				<Option deps_output="../Release/" />
+				<Option type="1" />
 				<Option compiler="gcc" />
 				<Compiler>
+					<Add option="-march=native" />
+					<Add option="-O1" />
+					<Add option="-m64" />
 					<Add option="-DWIN32" />
 					<Add option="-DNDEBUG" />
 					<Add option="-D_CONSOLE" />
 					<Add option="-D_LIB" />
-					<Add directory="../../_INCLUDES/SDL2_ttf-2.0.12 Visual Studio/include" />
-					<Add directory="../../_INCLUDES/SDL2-2.0.3 Visual Studio/include" />
-					<Add directory="$(IncludePath)" />
+					<Add directory="../../_INCLUDES/SDL2_ttf/include/" />
+					<Add directory="../../_INCLUDES/SDL2/include/" />
 				</Compiler>
 				<Linker>
-					<Add library="SDL2.lib" />
-					<Add library="SDL2main.lib" />
-					<Add library="SDL2_ttf.lib" />
-					<Add directory="../../_INCLUDES/SDL2_ttf-2.0.12 Visual Studio/lib/x86" />
-					<Add directory="../../_INCLUDES/SDL2-2.0.3 Visual Studio/lib/x86" />
-					<Add directory="$(LibraryPath)" />
+					<Add option="-s" />
+					<Add option="-m64" />
+					<Add library="../../_INCLUDES/SDL2/lib/x64/SDL2main.lib" />
+					<Add library="../../_INCLUDES/SDL2_ttf/lib/x64/SDL2_ttf.lib" />
+					<Add library="../../_INCLUDES/SDL2/lib/x64/SDL2.lib" />
+					<Add directory="../../_INCLUDES/SDL2/lib/x64" />
+					<Add directory="../../_INCLUDES/SDL2_ttf/lib/x64" />
 				</Linker>
 			</Target>
-			<Target title="Release Win32">
-				<Option output="C-Template Consoloe Application" prefix_auto="1" extension_auto="1" />
-				<Option type="0" />
+			<Target title="Release x86">
+				<Option output="../Release-x86-CodeBlocks/CAScope" prefix_auto="1" extension_auto="1" />
+				<Option working_dir="../Release-x86-CodeBlocks/" />
+				<Option object_output="../Release-x86-CodeBlocks/" />
+				<Option deps_output="../Release/" />
+				<Option type="1" />
 				<Option compiler="gcc" />
 				<Compiler>
+					<Add option="-march=native" />
+					<Add option="-O1" />
+					<Add option="-m32" />
 					<Add option="-DWIN32" />
 					<Add option="-DNDEBUG" />
 					<Add option="-D_CONSOLE" />
 					<Add option="-D_LIB" />
-					<Add directory="../../_INCLUDES/SDL2_ttf-2.0.12 Visual Studio/include" />
-					<Add directory="../../_INCLUDES/SDL2-2.0.3 Visual Studio/include" />
-					<Add directory="$(IncludePath)" />
+					<Add directory="../../_INCLUDES/SDL2_ttf/include/" />
+					<Add directory="../../_INCLUDES/SDL2/include/" />
 				</Compiler>
 				<Linker>
-					<Add library="SDL2.lib" />
-					<Add library="SDL2main.lib" />
-					<Add library="SDL2_ttf.lib" />
-					<Add directory="../../_INCLUDES/SDL2_ttf-2.0.12 Visual Studio/lib/x86" />
-					<Add directory="../../_INCLUDES/SDL2-2.0.3 Visual Studio/lib/x86" />
-					<Add directory="$(LibraryPath)" />
+					<Add option="-s" />
+					<Add option="-m32" />
+					<Add library="../../_INCLUDES/SDL2/lib/x86/SDL2.lib" />
+					<Add library="../../_INCLUDES/SDL2/lib/x86/SDL2main.lib" />
+					<Add library="../../_INCLUDES/SDL2_ttf/lib/x86/SDL2_ttf.lib" />
+					<Add directory="../../_INCLUDES/SDL2/lib/x86" />
+					<Add directory="../../_INCLUDES/SDL2_ttf/lib/x86" />
 				</Linker>
 			</Target>
 		</Build>
+		<Compiler>
+			<Add option="-fexpensive-optimizations" />
+			<Add option="-flto" />
+			<Add option="-O3" />
+			<Add option="-Wall" />
+		</Compiler>
+		<Linker>
+			<Add option="-flto" />
+		</Linker>
 		<Unit filename="ca.c">
 			<Option compilerVar="CC" />
 		</Unit>
+		<Unit filename="ca.h" />
+		<Unit filename="color.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="color.h" />
+		<Unit filename="diffusion-new-relative.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="hp_timer.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="hp_timer.h" />
 		<Unit filename="main.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="mgm.c">
+		<Unit filename="opencl-test.cl" />
+		<Unit filename="pcg_basic.c">
 			<Option compilerVar="CC" />
 		</Unit>
+		<Unit filename="pcg_basic.h" />
 		<Unit filename="simfw.c">
 			<Option compilerVar="CC" />
 		</Unit>
+		<Unit filename="simfw.h" />
 		<Unit filename="sound.c">
 			<Option compilerVar="CC" />
 		</Unit>
@@ -115,10 +107,6 @@
 		</Unit>
 		<Unit filename="stdafx.h" />
 		<Unit filename="targetver.h" />
-		<Extensions>
-			<code_completion />
-			<envvars />
-			<debugger />
-		</Extensions>
+		<Extensions />
 	</Project>
 </CodeBlocks_project_file>

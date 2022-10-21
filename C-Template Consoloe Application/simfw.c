@@ -5,6 +5,14 @@
 #include "hp_timer.h"
 #include "pcg_basic.h"			// Random Number Library
 
+// defines for gcc
+#define MAXUINT16 ((UINT16)~ ((UINT16)0))
+#define MAXUINT32 ((UINT32)~ ((UINT32)0))
+#define MAXUINT64   ((UINT64)~((UINT64)0))
+#define MAXUINT     ((UINT)~((UINT)0))
+#define MAXINT      ((INT)(MAXUINT >> 1))
+#define MININT      ((INT)~MAXINT)
+// end defines for gcc
 
 #define SIMFW_TEST_TITLE	"MGM GRAND"
 #define SIMFW_FONTSIZE			12
@@ -17,7 +25,7 @@
 #define SIMFW_TEST_DSP_HEIGHT	800
 #define SIMFW_TEST_FPS_LIMIT	0
 //
-#define SIMFW_TEST_SIM_WIDTH	1200	
+#define SIMFW_TEST_SIM_WIDTH	1200
 #define SIMFW_TEST_SIM_HEIGHT	800
 
 
@@ -45,7 +53,7 @@ typedef struct tagSIMFW_KeyBinding {
 	double max;
 	double def;		// default
 	double step; // step
-	enum {KBVT_INT, KBVT_DOUBLE} val_type;
+	enum {KBVT_INT, KBVT_INT64, KBVT_DOUBLE} val_type;
 	void* val;
 	int* cgfg;	// change-flag - is set to one if val changed
 	int wpad;	// wrap-around
@@ -256,7 +264,7 @@ void
 SIMFW_SaveBMP(SIMFW *sfw, const char *filename, int hide_controls) {
 ////	SDL_Window *window = NULL;
 ////	SDL_Renderer *renderer = NULL;
-////	
+////
 ////	// init window
 ////	if (!(window = SDL_CreateWindow("Screenshot", 30, 30, sfw->sim_width, sfw->sim_height, 0))) {
 ////		printf("SDL_CreateWindow failed: %s\n", SDL_GetError());
@@ -267,7 +275,7 @@ SIMFW_SaveBMP(SIMFW *sfw, const char *filename, int hide_controls) {
 ////	}
 //////	windows->
 //////	SDL_CreateSoftwareRenderer(window.)
-////	
+////
 ////	SDL_RenderClear(renderer);
 ////
 ////	/* Copy simulation canvas on screen */
@@ -277,8 +285,8 @@ SIMFW_SaveBMP(SIMFW *sfw, const char *filename, int hide_controls) {
 ////	// re-allow access to pixels of texture
 ////	int pitch;
 ////	SDL_LockTexture(sfw->sim_texture, NULL, &sfw->sim_canvas, &pitch);	// lock texture to be able to access pixels
-////	
-////	
+////
+////
 ////	SDL_RenderCopy(renderer, sfw->flush_msg_texture, NULL, NULL);
 ////	//
 ////	SDL_RenderPresent(renderer);
@@ -298,8 +306,8 @@ SIMFW_SaveBMP(SIMFW *sfw, const char *filename, int hide_controls) {
 	//
 	SDL_Surface *sshot = SDL_CreateRGBSurface(0, sfw->window_width, sfw->window_height, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);
 	SDL_RenderReadPixels(sfw->renderer, NULL, SDL_PIXELFORMAT_ARGB8888, sshot->pixels, sshot->pitch);
-	
-	
+
+
 	//if (MessageBox(NULL, "Save Screenshot?", 'MGM', MB_OKCANCEL) == 1) {
 	char auto_filename[1000] = "";
 	sprintf_s(auto_filename, sizeof(auto_filename), "%u.bmp", (unsigned)time(NULL));
@@ -318,7 +326,7 @@ SIMFW_SaveBMP(SIMFW *sfw, const char *filename, int hide_controls) {
 	SDL_FreeSurface(sshot);
 }
 
-	
+
 /*
 Saves all variables in keybindings to a file
 */
@@ -659,7 +667,7 @@ SIMFW_Init(SIMFW *simfw, const char *window_title, int window_height, int window
 		return simfw;
 	}
 	// get window surface
-	simfw->window_surface = SDL_GetWindowSurface(simfw->window);	// visible surface of the window	
+	simfw->window_surface = SDL_GetWindowSurface(simfw->window);	// visible surface of the window
 	// SDL hints / configuration
 	//SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "2"); // anti-alias
 	// position window
@@ -753,7 +761,7 @@ SIMFW_UpdateDisplay(SIMFW *simfw) {
 	}
 
 	//SDL_RenderClear(simfw->renderer);	// as we are drawing the whole screen everytime we maybe do not need to call this
-	
+
 	/* Copy simulation canvas on screen */
 	SDL_UnlockTexture(simfw->sim_texture);
 	SDL_RenderCopy(simfw->renderer, simfw->sim_texture, NULL, NULL);
@@ -994,7 +1002,7 @@ SIMFW_Test_Mandelbrot() {
 
 	int wh = simfw.sim_width;							// width
 	int ht = simfw.sim_height;							// height
-	
+
 	uint32_t* sc = NULL;								// space
 	int sz = ht * wh;									// size of space
 	if (sc == NULL) {
@@ -1335,9 +1343,9 @@ SIMFW_Test_Mandelbrot() {
 					int i;
 /*
 					for (i = 0; i < max_iteration; i++) {
-						if (m2 > 1024.0) { 
-							di = 0.0; 
-							break; 
+						if (m2 > 1024.0) {
+							di = 0.0;
+							break;
 						}
 
 						// Z' -> 2·Z·Z' + 1
@@ -1346,7 +1354,7 @@ SIMFW_Test_Mandelbrot() {
 						dzy = 2.0 * zx * dzy + zy * dzx + 0.0;
 						dzx = tdzx;
 
-						// Z -> Z² + c			
+						// Z -> Z² + c
 						//z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
 						tzx = zx * zx - zy * zy + cx;
 						zy = 2.0 * zx * zy + cy;
@@ -1354,17 +1362,17 @@ SIMFW_Test_Mandelbrot() {
 
 						m2 = zx * zx + zy * zy;
 					}
-				
-					// distance	
+
+					// distance
 					// d(c) = |Z|·log|Z|/|Z'|
 					///double d = 0.5 * sqrt((zx * zx + zy * zy) / (dzx * dzx + dzy * dzy)) * log((zx * zx + zy * zy));
 					double d = sqrt((zx * zx + zy * zy) / sqrt(dzx * dzx + dzy * dzy)) * log(sqrt(zx * zx + zy * zy));
 					//if (di > 0.5) d = 0.0;
 
 					double v = (double)i + d;
-					v = d;	
-					
-					
+					v = d;
+
+
 					v = max(v, imn[i]);
 					v = min(v, imn[i] + pow(2.0, dymxrg / 10.0));
 					v = 1.0 / (max_iteration - imin) * (i - imin + 1.0 - (v - imn[i]) / pow(2.0, dymxrg / 10.0));
@@ -1447,7 +1455,7 @@ SIMFW_Test_Mandelbrot() {
 				imn[i] = min(mx, nimn[i] + pow(2.0, dymxrg / 10.0));
 			}
 		}
-	
+
 		int msy, msx;
 		//SIMFW_GetMouseState(&simfw, &msy, &msx);
 		//ty = ty - zm / 2.0 + zm * (double)msy / simfw.sim_height;

@@ -8,18 +8,28 @@
 #include "hp_timer.h"						// high performance timing functions
 #include "pcg_basic.h"						// random number generator library
 
+// defines for gcc
+#define MAXUINT16 ((UINT16)~ ((UINT16)0))
+#define MAXUINT32 ((UINT32)~ ((UINT32)0))
+#define MAXUINT64   ((UINT64)~((UINT64)0))
+#define MAXUINT     ((UINT)~((UINT)0))
+#define MAXINT      ((INT)(MAXUINT >> 1))
+#define MININT      ((INT)~MAXINT)
+// end defines for gcc
+
 #include "math.h"
 #define M_E        2.71828182845904523536   // Euler's number
 
 // Return a random double value in the range [0, 1)
-__inline double random01() {
+// TODO __inline does not work with gcc high optimization setting
+double random01() {
 	return ldexp(pcg32_random(), -32);
 }
 
 /* OpenCL */
 #define ENABLE_CL 0
 // to enable OpenCL also select the appropiate build option ("Release OpenCL enabled") include OpenCL headers in Settings > Compiler > Additional Include Directories and the lib file in Settings > Linker > Additional Dependencies / Zusätzliche Abhängigkeiten
-#if ENABLE_CL 
+#if ENABLE_CL
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS // https://stackoverflow.com/questions/28500496/opencl-function-found-deprecated-by-visual-studio
 #include <CL/cl.h>
 #endif
@@ -53,19 +63,19 @@ SIMFW sfw = { 0 };
 CA_CT* ca_space = NULL;								// cell-space
 uint64_t ca_space_sz = 1 << 16;
 
-int sdmrpt;											// hash-array - speed-multiplicator-as-power-of-two - 1 means ca runs with speed of half its size (speed=(size/2)*2^(sdmrpt-1)) 
+int sdmrpt;											// hash-array - speed-multiplicator-as-power-of-two - 1 means ca runs with speed of half its size (speed=(size/2)*2^(sdmrpt-1))
 
 
 typedef struct caDisplaySettings {
 	int fsme;										// focus-mode - 0: absolute, 1: totalistic, 2: frequency - only in hash computing mode
 	int tm;											// test mode - 0: disabled, 1: graphics, 2: computation
-	unsigned int ar;								// auto-range - 0: none, 1: auto min, 2: auto max, 3: auto min and max 
+	unsigned int ar;								// auto-range - 0: none, 1: auto min, 2: auto max, 3: auto min and max
 	double ard;										// auto-range delay
 	double arf;										// auto-range force
-	unsigned int cm;								// color mode 
-	unsigned int crct;								// color count 
-	unsigned int gm;								// gradient mode 
-	unsigned int lgm;								// log mode 
+	unsigned int cm;								// color mode
+	unsigned int crct;								// color count
+	unsigned int gm;								// gradient mode
+	unsigned int lgm;								// log mode
 	unsigned int cmm;								// cumulative mode
 	double sd;										// spread - range: 0.0 - +2.0; 1.0 = disabled
 	double te;										// translate - range: -1.0 - +1.0 / 0.0 = disabled
@@ -74,8 +84,8 @@ typedef struct caDisplaySettings {
 	int sfcm;										// screen-filling-curve-mode
 	int sfcsw;										// screen-filling-curve-step-width
 	int sfcmp;										// screen-filling-curve-mode-paramter
-	int vlfs;										// focus > nr. of hlfs cells next to eachother are summed... TODO 
-	int hlfs;										// focus > nr. of hlfs cells next to eachother are summed... TODO 
+	int vlfs;										// focus > nr. of hlfs cells next to eachother are summed... TODO
+	int hlfs;										// focus > nr. of hlfs cells next to eachother are summed... TODO
 	int vlzm;										// vertical zoom - how many vertical cells will make out one pixel (together with hor. zoom); 0 = disable drawing, < 0 = how many vertical pixels a cell will make out
 	int hlzm;										// horizontal zoom - how many horizontal cells will make out one pixel (together with vert. zoom); 0 = disable drawing, < 0 = how many horizontal pixels a cell will make out
 	int vlpz;										// vertical pixel zoom
@@ -108,8 +118,8 @@ const CA_RULE CA_RULE_EMPTY = { 0, 0, 0, 0, 0, 0, 0, 0 };
 #define BBTBTCTMM ((1<<BBTBTCTPT) - 1)				// bit-block-type-bit-count-mod-mask - is equivalent to X % vertical-bit-block-type-bit-count (must be power of 2)
 #define FBPT UINT16									// full-bit-block c-data-type
 #define HBPT UINT8									// half-bit-block c-data-type
-#define BPB 16										// bits per block, i.e. bits per elemet in bta 
-#define BPBMM (BPB - 1)								// bits-per-block-mod-mask - X & (BPB - 1) is equivalent to X % BPB when BPB is power of 2 
+#define BPB 16										// bits per block, i.e. bits per elemet in bta
+#define BPBMM (BPB - 1)								// bits-per-block-mod-mask - X & (BPB - 1) is equivalent to X % BPB when BPB is power of 2
 #define BPBS 4										// bits per block shift - i.e. nr of bit shifts needed to divide by BPB
 typedef struct caBitArray {
 	BBT* v;											// vertical/horizontal-bit-array (vhba) - first valid element / array-pointer to bit array
@@ -125,7 +135,7 @@ typedef struct caBitArray {
 	CA_CT* clsc;									// cell-space
 	uint64_t scsz;									// cell-space-size in nr of cells
 	int brsz;										// cell-space-border-size in nr of cells
-	CA_RULE* cr;									// ca-rule configuration 	
+	CA_RULE* cr;									// ca-rule configuration
 } caBitArray;
 
 __inline
@@ -179,7 +189,7 @@ int32_t log2fix(uint32_t x, size_t precision)
 	return y;
 }
 
-// fnv hash functions: http://www.isthe.com/chongo/tech/comp/fnv/index.html 
+// fnv hash functions: http://www.isthe.com/chongo/tech/comp/fnv/index.html
 /*
  * 32 bit magic FNV-0 and FNV-1 prime
  */
@@ -242,7 +252,7 @@ fnv_16_buf(void* buf, size_t len)
 // returns 0-terminated string of content of filename
 char* read_file(const char* filename) {
 	printf("INF read file  %s", filename);
-	// Get the current working directory:   
+	// Get the current working directory:
 	char* cwdbuf[1024];
 	if (_getcwd(cwdbuf, sizeof(cwdbuf)) == NULL)
 		perror("_getcwd error\n");
@@ -408,7 +418,7 @@ CABitArrayPrepareOL(caBitArray* ba) {
 
 /*
 * See notes of caBitArray struct!
-* 
+*
 * Make sure to free free (_aligned_free) ba.v before reseting / reinitializing
 *
 * ba	make sure ba is initialized to zero before first use (ba = { 0 };
@@ -500,7 +510,7 @@ convert_next_cell:
 	if (dr)
 		*csc = 1 & ((*bac) >> bacst);						// convert vba -> csv
 	else
-		*bac |= ((BBT)*csc) << bacst;						// convert csv -> vba 
+		*bac |= ((BBT)*csc) << bacst;						// convert csv -> vba
 	//
 	++drw;
 	++csc;
@@ -651,7 +661,7 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 	for (int dn = 1; dn < 5; ++dn) {				// duration-loop
 		UINT16 i = 0;								// cell-space-index
 		for (;;) {									// cell-space-loop
-			UINT16 cs = i;							// result cell-space
+            UINT16 cs = i;							// result cell-space
 			// get result byte
 			for (int tm = 0; tm < dn; ++tm) {		// time-loop
 				for (int p = 0; p < 14; ++p) {
@@ -783,7 +793,9 @@ int64_t CA_CNFN_VBA_1x256(int64_t gnc, caBitArray* vba) {
 }
 
 int64_t CA_CNFN_OMP_TEST(int64_t gnc, caBitArray* vba) {
-	omp_set_num_threads(1 << vba->bcpt);
+    /*
+	* TODO does not work with gcc
+///	omp_set_num_threads(1 << vba->bcpt);
 
 	convertBetweenCACTandCABitArray(vba, 0);
 
@@ -798,7 +810,7 @@ int64_t CA_CNFN_OMP_TEST(int64_t gnc, caBitArray* vba) {
 	#pragma omp parallel default(none) shared(vba) firstprivate(v, bh, oc, gnc)
 	//		for (int bkcr = 0; bkcr < 1 << vba->bcpt; bkcr++)
 	{
-		int bkcr = omp_get_thread_num();
+///		int bkcr = omp_get_thread_num();
 //		printf("thread #%d\n", bkcr);
 		while (gnc > 0) {
 			gnc -= 2;
@@ -874,6 +886,7 @@ int64_t CA_CNFN_OMP_TEST(int64_t gnc, caBitArray* vba) {
 	//ymm0 = _mm256_xor_si256(ymm0, ymm1);
 
 	//_mm256_store_si256(vbac + ri, ymm0);
+	*/
 }
 
 int64_t CA_CNFN_VBA_16x256(int64_t pgnc, caBitArray* vba) {
@@ -1125,7 +1138,7 @@ UINT32 HCMXSC = 8;							// hash-cell-maximum-seek-count
 
 #define HCTBSPT	2							// hash-cell-table-base-size as power of two -- MUST BE 2 ATM
 #define HCTBS (1<<HCTBSPT)					// hash-cell-table-base-size / size of lowest/smallest level
-//#define HCTBSMK ((1<<HCTBSPT) - 1)			// hash-cell-table-base-size-mask 
+//#define HCTBSMK ((1<<HCTBSPT) - 1)			// hash-cell-table-base-size-mask
 
 #define HCIMASK (((UINT32)1<<HCISZPT)-1)	// hash-cell-index-mask /* for example: (u_int32_t)0xffff */
 #define HCISZ ((UINT32)1<<HCISZPT)		// hash-cell-index-size
@@ -1281,6 +1294,220 @@ void HC_print_node(int ll, int mxll, HCI n) {
 }
 
 /*
+ll		level
+dh		(calling-)depth
+ln		left node	- MUST have a positive uc (usage count), otherwise there is the possibility of it to be overwritten when searching for an empty node
+rn		right node	- MUST have a positive uc (usage count), otherwise there is the possibility of it to be overwritten when searching for an empty node
+rt		unless null, will be set to the result node of the found or added branch - guaranteed to have a uc (usage count) greater than 0
+returns index of found or added branch - if newly created this will have a uc (usage count) of 0
+*/
+	int hcfl = 0; // hash-cell-table-full flag
+HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
+	HCI cm;										// checksum
+	// base / lowest level > result is guaranteed to be present
+	//if (!ll) {
+	//	cm = ((ln<<2) | rn) + 1;
+	//	if (rt)
+	//		*rt = hct[cm].r;
+	//	return cm;
+	//}
+
+	// Generate checksum.
+	UINT32 cm32;
+	cm32 = fnv_32_buf(&ln, HCITPBYC, FNV1_32_INIT);
+	cm32 = fnv_32_buf(&rn, HCITPBYC, cm32);
+	cm = ((cm32 >> HCISZPT) ^ cm32);						// Xor-fold 32bit checksum to fit size of hash-table (needed mask is applied in while-loop).
+
+	// Search for checksum.
+	int sc = 0;												// seek-count
+	HCI encm = 0;											// empty-node-checksum
+	UINT32 enll = 0;										// empty-node-level
+	while (1) {
+		++sc;
+		cm &= HCIMASK;
+		cm = max(1 + HCTBS, cm);							// index can never be 0 or one of the base nodes of level 0
+		if (!ll) {											// nodes on level 0 are expected to be present and search at level 0 would produce errors
+			hc_stats[0].fc++;
+			break;
+		}
+		// Is the index occupied (ln != 0)?
+		if (hct[cm].ln) {
+			// Searched node found
+			if (hct[cm].ln == ln && hct[cm].rn == rn) {
+				hc_stats[ll].fc++;
+				break;
+			}
+			else {
+				UINT32 cnll = (hct[cm].uc & HCLLMK) >> 24;	// current-node-level
+				// Unused node found at checksum-index > recycle (delete unused node)
+				if ((!encm || cnll > enll) && (hct[cm].uc & HCUCMK) == 0) {
+					encm = cm;
+					enll = cnll;
+				}
+			}
+		}
+		//
+		if (encm && sc > HCMXSC) {
+			cm = encm;
+			if (hct[cm].ln > HCTBS + 1);	// TODO it should be possible to do this without the check, when uc is set on 1 (pos. 0) and basic nodes
+				hct[hct[cm].ln].uc--;
+			if (hct[cm].rn > HCTBS + 1);	// see above
+				hct[hct[cm].rn].uc--;
+			if (hct[cm].r > HCTBS + 1);		// see above
+				hct[hct[cm].r].uc--;
+			hct[cm].ln = 0;
+			int rcll = (hct[cm].uc & HCLLMK) >> 24;	// recycled-node-level
+			hc_stats[rcll].nc--;
+			hc_stats[rcll].rcct++;
+		}
+		// Hashtable at checksum-index is empty > add new entry
+		if (!hct[cm].ln) {
+			hc_stats[ll].nc++;
+			hc_stats[ll].adct++;
+			// Add new branch / entry to hashtable
+			hct[cm].uc = ((UINT32)ll << 24) | 1;
+			hct[cm].ln = ln;
+			hct[cm].rn = rn;
+			hct[ln].uc++;
+			hct[rn].uc++;
+			// Query result node - first pass.
+			HCI fm, fmr, sl, slr, sr, srr, tb;
+			fm = HC_find_or_add_branch(ll - 1, hct[ln].rn, hct[rn].ln, &fmr); // middle-result
+			hct[fm].uc++;
+			// Second pass.
+			sl = HC_find_or_add_branch(ll - 1, hct[ln].r, fmr, &slr);
+			hct[sl].uc++;
+			sr = HC_find_or_add_branch(ll - 1, fmr, hct[rn].r, &srr);
+			hct[sr].uc++;
+			// Third pass.
+			tb = HC_find_or_add_branch(ll - 1, slr, srr, NULL);
+			hct[cm].r = tb;
+			hct[tb].uc++;
+			hct[fm].uc--;
+			hct[sl].uc--;
+			hct[sr].uc--;
+			hct[cm].uc &= HCLLMK;	// set usage-count to 0 but keep level
+			if ((hct[ln].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[ln].uc & HCUCMK;
+			if ((hct[rn].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[rn].uc & HCUCMK;
+			if ((hct[tb].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[tb].uc & HCUCMK;
+			//hc_stats[ll - 1].ucmx = max(
+			//	hc_stats[ll - 1].ucmx,
+			//	max(
+			//		hct[ln].uc,
+			//		max(
+			//			hct[rn].uc,
+			//			hct[tb].uc)));
+
+			break;
+		}
+		++cm;
+		// hashtable size warning
+		//if (sc >= 255) {
+		//	printf("WARNING! Hash-table-size low, seek-count at %d\n", sc);
+		//}
+		// hashtable size to big > abort
+		hcfl++;
+		if (hcfl >= HCISZ << 2) {
+			cm = hc_ens[ll];		// return empty node as result
+			hc_stats[ll].fc++;
+			break;
+		}
+		//// Hashtable is full!
+		//if (sc >= HCISZ) {
+		//	printf("ERROR! hash table at level %d is full with %d cm %08X  HCISZ %d (press any key)\n", ll, sc, cm, HCISZ);
+		//	getch();
+		//	break;
+		//}
+	}
+	// Update stats.
+	hc_stats[ll].sc++;
+	hc_stats[ll].ss += sc;
+	//
+	if (rt)
+		*rt = hct[cm].r;
+
+	return cm;
+}
+
+
+/* IN DEVELOPMENT! */
+// try to make other speeds possible than 2^n*(space-size / 2)
+/*
+HCI HC_NG(int ll, int64_t* tm, HCI ln, HCI rn) {
+	HCI rt;
+	if (!tm) {
+		rt = ln;
+	}
+	else if (tm == (int64_t)(HCTBS / 4)<<ll) {
+		rt = HC_find_or_add_branch(ll, ln, rn, NULL);
+		rt = hct[rt].r;
+		tm = 0;
+	}
+	else if (tm > (int64_t)(HCTBS / 4)<<ll) {
+		HCI nl;
+		nl = HC_find_or_add_branch(ll, ln, rn, NULL);
+		rt = HC_NG(ll + 1, &tm, nl, nl);
+	}
+	else if (tm < (int64_t)(HCTBS / 4)<<ll) {
+		HCI nl, nr;
+		nl = HC_NG(ll - 1, &tm, hct[ln].ln, hct[ln].rn);
+		nr = HC_NG(ll - 1, &tm, hct[ln].rn, hct[rn].ln);
+		rt = HC_find_or_add_branch(ll, nl, nr, NULL);
+	}
+}
+*/
+
+/*
+ll		level
+mxll*	max-level
+
+returns last added (and therefore top-most) node
+
+NOTE on reference count (uc):
+If a left node is added (uncomplete branch) its uc is at least 1
+If a right node is added (branch is complete) the uc of left and right is decremented by one, but a new left node one level up is added which has an uc of at least 1
+> use hct[result_node].uc &= HCLLMK;  to reset uc for last returned node
+*/
+HCI HC_add_node(int ll, HCI n, int* mxll) {
+#define D 0				// debug-mode
+#if D
+	char indent[HCTMXLV * 2 + 1];
+	memset(indent, ' ', HCTMXLV * 2);
+	indent[ll * 2] = 0;
+	printf("%sN l %d  n 0x%04X  (press any key to continue)\n", indent, ll, n);
+	getch();
+#endif
+
+	// Add Node to branch.
+	if (hcls[ll] == 0) {
+		// Branch is empty > add first node and wait for the seconde one
+		hcln[ll] = n;
+		if (ll)
+			hct[n].uc++;
+		hcls[ll] = 1;
+		return n;
+	}
+	else {
+		*mxll = ll;
+		HCI ln = hcln[ll];							// left-node
+		HCI rn = n;									// right-node
+		if (ll)
+			hct[n].uc++;
+		HCI nn;										// new-node
+		static HCI tn = 0;
+		hcls[ll] = 0;
+		// Branch of two nodes is complete.
+		tn = HC_find_or_add_branch(ll, ln, rn, NULL);
+		// Prepare node one level up
+		nn = HC_add_node(ll + 1, tn, mxll);
+		if (ll) hct[ln].uc--;
+		if (ll) hct[rn].uc--;
+		//hct[tn].uc--;
+		return nn;
+	}
+}
+
+/*
 vba		vba->v needs to point to linear-bit-array as created by convert_CA_CT_to_bit_array
 *ll		will receive the level of the result-node
 
@@ -1405,7 +1632,7 @@ UINT32* old_display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, 
 }
 
 //__declspec(noinline)
-UINT32* 
+UINT32*
 display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 pv, int pll, HCI n, UINT32* pmxv, UINT32* pmnv) {
 //	printf("xxx");
 	int hpn[HCTMXLV] = { 0 };		// heap-node
@@ -1473,170 +1700,6 @@ display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 pv, int pll, HC
 	return pbf;
 }
 
-/*
-ll		level
-dh		(calling-)depth
-ln		left node	- MUST have a positive uc (usage count), otherwise there is the possibility of it to be overwritten when searching for an empty node
-rn		right node	- MUST have a positive uc (usage count), otherwise there is the possibility of it to be overwritten when searching for an empty node
-rt		unless null, will be set to the result node of the found or added branch - guaranteed to have a uc (usage count) greater than 0
-returns index of found or added branch - if newly created this will have a uc (usage count) of 0
-*/
-	int hcfl = 0; // hash-cell-table-full flag
-HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
-	HCI cm;										// checksum
-	// base / lowest level > result is guaranteed to be present
-	//if (!ll) {
-	//	cm = ((ln<<2) | rn) + 1;
-	//	if (rt)
-	//		*rt = hct[cm].r;
-	//	return cm;
-	//}
-
-	// Generate checksum.
-	UINT32 cm32;
-	cm32 = fnv_32_buf(&ln, HCITPBYC, FNV1_32_INIT);
-	cm32 = fnv_32_buf(&rn, HCITPBYC, cm32);
-	cm = ((cm32 >> HCISZPT) ^ cm32);						// Xor-fold 32bit checksum to fit size of hash-table (needed mask is applied in while-loop).
-
-	// Search for checksum.
-	int sc = 0;												// seek-count
-	HCI encm = 0;											// empty-node-checksum
-	UINT32 enll = 0;										// empty-node-level
-	while (1) {
-		++sc;
-		cm &= HCIMASK;
-		cm = max(1 + HCTBS, cm);							// index can never be 0 or one of the base nodes of level 0
-		if (!ll) {											// nodes on level 0 are expected to be present and search at level 0 would produce errors
-			hc_stats[0].fc++;
-			break;
-		}
-		// Is the index occupied (ln != 0)? 
-		if (hct[cm].ln) {
-			// Searched node found
-			if (hct[cm].ln == ln && hct[cm].rn == rn) {
-				hc_stats[ll].fc++;
-				break;
-			}
-			else {
-				UINT32 cnll = (hct[cm].uc & HCLLMK) >> 24;	// current-node-level
-				// Unused node found at checksum-index > recycle (delete unused node)
-				if ((!encm || cnll > enll) && (hct[cm].uc & HCUCMK) == 0) {
-					encm = cm;
-					enll = cnll;
-				}
-			}
-		}
-		//
-		if (encm && sc > HCMXSC) {
-			cm = encm;
-			if (hct[cm].ln > HCTBS + 1);	// TODO it should be possible to do this without the check, when uc is set on 1 (pos. 0) and basic nodes
-				hct[hct[cm].ln].uc--;
-			if (hct[cm].rn > HCTBS + 1);	// see above
-				hct[hct[cm].rn].uc--;
-			if (hct[cm].r > HCTBS + 1);		// see above
-				hct[hct[cm].r].uc--;
-			hct[cm].ln = 0;
-			int rcll = (hct[cm].uc & HCLLMK) >> 24;	// recycled-node-level	
-			hc_stats[rcll].nc--;
-			hc_stats[rcll].rcct++;
-		}
-		// Hashtable at checksum-index is empty > add new entry
-		if (!hct[cm].ln) {
-			hc_stats[ll].nc++;
-			hc_stats[ll].adct++;
-			// Add new branch / entry to hashtable
-			hct[cm].uc = ((UINT32)ll << 24) | 1;
-			hct[cm].ln = ln;
-			hct[cm].rn = rn;
-			hct[ln].uc++;
-			hct[rn].uc++;
-			// Query result node - first pass.
-			HCI fm, fmr, sl, slr, sr, srr, tb;
-			fm = HC_find_or_add_branch(ll - 1, hct[ln].rn, hct[rn].ln, &fmr); // middle-result
-			hct[fm].uc++;
-			// Second pass.
-			sl = HC_find_or_add_branch(ll - 1, hct[ln].r, fmr, &slr);
-			hct[sl].uc++;
-			sr = HC_find_or_add_branch(ll - 1, fmr, hct[rn].r, &srr);
-			hct[sr].uc++;
-			// Third pass.
-			tb = HC_find_or_add_branch(ll - 1, slr, srr, NULL);
-			hct[cm].r = tb;
-			hct[tb].uc++;
-			hct[fm].uc--;
-			hct[sl].uc--;
-			hct[sr].uc--;
-			hct[cm].uc &= HCLLMK;	// set usage-count to 0 but keep level
-			if ((hct[ln].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[ln].uc & HCUCMK;
-			if ((hct[rn].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[rn].uc & HCUCMK;
-			if ((hct[tb].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[tb].uc & HCUCMK;
-			//hc_stats[ll - 1].ucmx = max(
-			//	hc_stats[ll - 1].ucmx,
-			//	max(
-			//		hct[ln].uc,
-			//		max(
-			//			hct[rn].uc,
-			//			hct[tb].uc)));
-
-			break;
-		}
-		++cm;
-		// hashtable size warning
-		//if (sc >= 255) {
-		//	printf("WARNING! Hash-table-size low, seek-count at %d\n", sc);
-		//}
-		// hashtable size to big > abort
-		hcfl++;
-		if (hcfl >= HCISZ << 2) {
-			cm = hc_ens[ll];		// return empty node as result
-			hc_stats[ll].fc++;
-			break;
-		}
-		//// Hashtable is full!
-		//if (sc >= HCISZ) {
-		//	printf("ERROR! hash table at level %d is full with %d cm %08X  HCISZ %d (press any key)\n", ll, sc, cm, HCISZ);
-		//	getch();
-		//	break;
-		//}
-	}
-	// Update stats.
-	hc_stats[ll].sc++;
-	hc_stats[ll].ss += sc;
-	//
-	if (rt)
-		*rt = hct[cm].r;
-
-	return cm;
-}
-
-
-/* IN DEVELOPMENT! */
-// try to make other speeds possible than 2^n*(space-size / 2)
-/*
-HCI HC_NG(int ll, int64_t* tm, HCI ln, HCI rn) {
-	HCI rt;
-	if (!tm) {
-		rt = ln;
-	}
-	else if (tm == (int64_t)(HCTBS / 4)<<ll) {
-		rt = HC_find_or_add_branch(ll, ln, rn, NULL);
-		rt = hct[rt].r;
-		tm = 0;
-	}
-	else if (tm > (int64_t)(HCTBS / 4)<<ll) {
-		HCI nl;
-		nl = HC_find_or_add_branch(ll, ln, rn, NULL);
-		rt = HC_NG(ll + 1, &tm, nl, nl);
-	}
-	else if (tm < (int64_t)(HCTBS / 4)<<ll) {
-		HCI nl, nr;
-		nl = HC_NG(ll - 1, &tm, hct[ln].ln, hct[ln].rn);
-		nr = HC_NG(ll - 1, &tm, hct[ln].rn, hct[rn].ln);
-		rt = HC_find_or_add_branch(ll, nl, nr, NULL);
-	}
-}
-*/
-
 int64_t CA_CNFN_HASH(int64_t pgnc, caBitArray* vba) {
 	for (int i = 0; i < HCTMXLV - 2; i++) {
 		hc_stats[i].fc = 0;
@@ -1685,56 +1748,6 @@ int64_t CA_CNFN_HASH(int64_t pgnc, caBitArray* vba) {
 
 void CA_SCFN_HASH(caBitArray* vba) {
 	convert_hash_array_to_CA_CT(hc_sl, hc_sn, vba->clsc, vba->clsc + vba->scsz);
-}
-
-/*
-ll		level
-mxll*	max-level
-
-returns last added (and therefore top-most) node
-
-NOTE on reference count (uc):
-If a left node is added (uncomplete branch) its uc is at least 1
-If a right node is added (branch is complete) the uc of left and right is decremented by one, but a new left node one level up is added which has an uc of at least 1
-> use hct[result_node].uc &= HCLLMK;  to reset uc for last returned node
-*/
-HCI HC_add_node(int ll, HCI n, int* mxll) {
-#define D 0				// debug-mode
-#if D
-	char indent[HCTMXLV * 2 + 1];
-	memset(indent, ' ', HCTMXLV * 2);
-	indent[ll * 2] = 0;
-	printf("%sN l %d  n 0x%04X  (press any key to continue)\n", indent, ll, n);
-	getch();
-#endif
-
-	// Add Node to branch.
-	if (hcls[ll] == 0) {
-		// Branch is empty > add first node and wait for the seconde one
-		hcln[ll] = n;
-		if (ll)
-			hct[n].uc++;
-		hcls[ll] = 1;
-		return n;
-	}
-	else {
-		*mxll = ll;
-		HCI ln = hcln[ll];							// left-node
-		HCI rn = n;									// right-node
-		if (ll)
-			hct[n].uc++;
-		HCI nn;										// new-node
-		static HCI tn = 0;
-		hcls[ll] = 0;
-		// Branch of two nodes is complete.
-		tn = HC_find_or_add_branch(ll, ln, rn, NULL);
-		// Prepare node one level up
-		nn = HC_add_node(ll + 1, tn, mxll);
-		if (ll) hct[ln].uc--;
-		if (ll) hct[rn].uc--;
-		//hct[tn].uc--;
-		return nn;
-	}
 }
 
 void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
@@ -1925,10 +1938,12 @@ ca_next_gen_ncn3_simd(
 		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 1));
 		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 2));
 		for (int i = 0; i < 32; i += 4)
-			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
-			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
-			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
-			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
+			// TODO check correctnes
+			// all forms of ymm0.m256i_u8[i + 0] rewritten to ((UINT8*)&ymm0)[i + 0] to work with gcc
+			((UINT8*)&ymm0)[i + 0] = cr->rltl[((UINT8*)&ymm0)[i + 0]],
+			((UINT8*)&ymm0)[i + 1] = cr->rltl[((UINT8*)&ymm0)[i + 1]],
+			((UINT8*)&ymm0)[i + 2] = cr->rltl[((UINT8*)&ymm0)[i + 2]],
+			((UINT8*)&ymm0)[i + 3] = cr->rltl[((UINT8*)&ymm0)[i + 3]];
 		_mm256_storeu_si256(clv, ymm0);
 		clv += 32;
 	}
@@ -1961,10 +1976,10 @@ ca_next_gen_abs_ncn3_ncs2_simd(
 		*/
 
 		for (int i = 0; i < 32; i += 4)
-			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
-			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
-			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
-			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
+			((UINT8*)&ymm0)[i + 0] = cr->rltl[((UINT8*)&ymm0)[i + 0]],
+			((UINT8*)&ymm0)[i + 1] = cr->rltl[((UINT8*)&ymm0)[i + 1]],
+			((UINT8*)&ymm0)[i + 2] = cr->rltl[((UINT8*)&ymm0)[i + 2]],
+			((UINT8*)&ymm0)[i + 3] = cr->rltl[((UINT8*)&ymm0)[i + 3]];
 		_mm256_storeu_si256(clv, ymm0);
 		clv += 32;
 	}
@@ -2031,7 +2046,7 @@ ca_count__simd(
 	////		goto count_sisd;
 	////	if (csc >= csk)
 	////		goto count_check;
-	////	// 
+	////	//
 	////	ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(csc + hlfs0));
 	////	//
 	////	register int i = mli;
@@ -2058,7 +2073,7 @@ count_simd:;
 	for (i = 1; i < hlfs; ++i)
 		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(csc + i));
 	for (i = 0; i < 32; i += hlzm) {
-		*pbc = ymm0.m256i_u8[i];
+		*pbc = ((UINT8*)&ymm0)[i];
 		++pbc;
 		csc += hlzm;
 	}
@@ -2147,10 +2162,10 @@ ca_next_gen__simd(
 		for (int i = 1; i < cr->ncn; ++i)
 			ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + i));
 		for (int i = 0; i < 32; i += 4)
-			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
-			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
-			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
-			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
+			((UINT8*)&ymm0)[i + 0] = cr->rltl[((UINT8*)&ymm0)[i + 0]],
+			((UINT8*)&ymm0)[i + 1] = cr->rltl[((UINT8*)&ymm0)[i + 1]],
+			((UINT8*)&ymm0)[i + 2] = cr->rltl[((UINT8*)&ymm0)[i + 2]],
+			((UINT8*)&ymm0)[i + 3] = cr->rltl[((UINT8*)&ymm0)[i + 3]];
 		_mm256_storeu_si256(clv, ymm0);
 		clv += 32;
 	}
@@ -2190,11 +2205,11 @@ int64_t CA_CNFN_SISD(int64_t pgnc, caBitArray* vba) {
 }
 
 /************************* OpenCL *************************/
-#if ENABLE_CL 
+#if ENABLE_CL
 static OCLCA oclca = { -1, NULL, NULL, NULL };
 #endif
 void CA_CNITFN_OPENCL(caBitArray* vba, CA_RULE* cr) {
-#if ENABLE_CL 
+#if ENABLE_CL
 	if (oclca.success != CL_SUCCESS)
 		oclca = OCLCA_Init("../opencl-vba.cl");
 #else
@@ -2208,7 +2223,7 @@ void CA_CNITFN_OPENCL(caBitArray* vba, CA_RULE* cr) {
 	initCAVerticalBitArray(vba, cr);
 }
 
-#if ENABLE_CL 
+#if ENABLE_CL
 // **********************************************************************************************************************************
 // OpenCL
 // *********************************************************************************************************************************
@@ -2412,7 +2427,7 @@ OCLCA_Init(
 	////result.kernel_ca_next_gen_tot_ncn3 = clCreateKernel(program, "ca_next_gen_tot_ncn3", &cl_errcode_ret);
 	////OCL_CHECK_ERROR(cl_errcode_ret)
 	////result.kernel_ca_next_gen_abs_ncn3_ncs2 = clCreateKernel(program, "ca_next_gen_abs_ncn3_ncs2", &cl_errcode_ret);
-	////OCL_CHECK_ERROR(cl_errcode_ret)	
+	////OCL_CHECK_ERROR(cl_errcode_ret)
 	////result.kernel_ca_next_gen_range_tot_ncn3 = clCreateKernel(program, "ca_next_gen_range_tot_ncn3", &cl_errcode_ret);
 	////OCL_CHECK_ERROR(cl_errcode_ret)
 	result.kernel_ca_next_gen_vba = clCreateKernel(program, "ca_next_gen_vba", &cl_errcode_ret);
@@ -2473,7 +2488,7 @@ void OCLCA_Run(
 	static cl_mem b_clo = NULL;			// opencl binding for cell-line
 	static cl_mem b_clsz = NULL;			// opencl binding for cell-line-size
 	static cl_mem b_ncn = NULL;			// opencl binding for ncn
-	static cl_mem b_rltl = NULL;			// opencl binding for 
+	static cl_mem b_rltl = NULL;			// opencl binding for
 	static cl_mem b_mntl = NULL;			// opencl binding for
 	static cl_mem b_rg = NULL;			// opencl binding for
 	static int clfp = 0;			// cell-line flip to switch between cli and clo
@@ -2710,7 +2725,7 @@ void OCLCA_RunVBA(
 #endif
 
 int64_t CA_CNFN_OPENCL(int64_t pgnc, caBitArray* vba) {
-#if ENABLE_CL 
+#if ENABLE_CL
 	OCLCA_RunVBA(pgnc, 0/*res*/, oclca, vba->cr, *vba, 1/*de*/, 16/*klrg*/);
 	pgnc = 0;
 	convertBetweenCACTandCABitArray(vba->clsc, vba->clsc + vba->scsz, vba, 1);
@@ -2743,7 +2758,7 @@ typedef enum {
 struct {
 	char* name;
 	int64_t(*cnfn)(int64_t, caBitArray*);				// computation-function
-	void		(*itfn)(caBitArray*);					// init-function
+	void		(*itfn)(caBitArray*, CA_RULE* cr);	    // init-function
 	void		(*scfn)(caBitArray*);					// sync-(ca-space)-function
 } const ca_cnsgs[CM_MAX] = {
 	[CM_DISABLED] = {
@@ -2916,7 +2931,7 @@ CA_RULE_PrintInfo(CA_RULE* cr, char* os, size_t sgsz) {
 			else if (cr->tp == ABS)								// absolute
 				rds += ipow(cr->ncs, cr->ncn - k - 1) * rns;
 			// print
-			sprintfa_s(snst, sizeof(snst), "%d", rns); // actually displays it in wrong order, i.e. rightmost neighbor is printed leftmost > has to be reversed before displaying		
+			sprintfa_s(snst, sizeof(snst), "%d", rns); // actually displays it in wrong order, i.e. rightmost neighbor is printed leftmost > has to be reversed before displaying
 		}
 		reverse(snst);
 		//sprintfa_s(os, sgsz, "%2d   %s\n", rds, snst);
@@ -3001,7 +3016,7 @@ CA_Rule(CA_RULE prl) {
 	// init rule table with zeros
 	for (int i = 0; i < prl.nns; i++)
 		prl.rltl[i] = 0;
-	// fill rule table 
+	// fill rule table
 	UINT64 trl = prl.rl;
 	int i = 0;
 	while (trl) {
@@ -3355,7 +3370,7 @@ display_2d_lindenmeyer(
 					if (lmvs == NULL) {
 						if (pbc >= pbi)
 							return;
-						int crpnc = trpnc / rc;			// corrected position 
+						int crpnc = trpnc / rc;			// corrected position
 						if (crpnc >= 0 && crpnc < rpni)
 							for (int v = 0; v < vlpzlw; v += plw)
 								for (int h = 0; h < hlpz; ++h)
@@ -3477,7 +3492,7 @@ display_2d_matze(
 							return;
 						pneol = min(pni, min(pnc + bh, pnc + (pbi - pbc) - 1));
 						//printf("pbc %p  pbi %p  pnc %p  pni %p  pneol %p\n", pbc, pbi, pnc, pni, pneol);
-					} 
+					}
 					else {
 						*pnc = *pbc;
 						++pnc;
@@ -3655,7 +3670,7 @@ display_2d_matze(
 		//	int g2c = g0c / g2z;											// grid 2d cursor
 		//	int g1c = g0c % g2z;											// grid 1d cursor - relative block cursor = position within block
 		//	int lmc = ((g2c / g1n) * g1z + g1c / g1z) * vlpz * plw +		// linear memory cursor
-		//			  ((g2c % g1n) * g1z + g1c % g1z) * hlpz;						
+		//			  ((g2c % g1n) * g1z + g1c % g1z) * hlpz;
 		//	UINT32 *pnc = pnv + cr + lmc;									// pixel-screen current element
 		//	if (pnc >= pnv && pnc < pni)
 		//		for (int vv = 0; vv < vlpzplw; vv += plw)					// pixel-zoom loops
@@ -3674,8 +3689,8 @@ display_2d_chaotic(
 	UINT32* pni,							// pixel-screen first invalid element
 	const int plw,							// pixel-screen line-width
 	const int dplw,							// pixel-screen display-line-width (right-aligned, so starts at plw - dplw and is dplw wide
-	static CA_CT* csv,						// cells first valid element
-	static CA_CT* csi,						// cells first invalid element
+	CA_CT* csv,						// cells first valid element
+	CA_CT* csi,						// cells first invalid element
 	const UINT32* pbv,						// pixel-buffer first valid element
 	const UINT32* pbi,						// pixel-buffer first invalid element
 	const int res							// reset flag
@@ -3720,9 +3735,9 @@ lifeanddrawnewcleanzoom(
 
 	does scrolling itself!
 	*/
-	CA_RULE* cr,										// ca-rule configuration 
-	CA_CT* sc,											// space 
-	uint64_t scsz,											// space-size 
+	CA_RULE* cr,										// ca-rule configuration
+	CA_CT* sc,											// space
+	uint64_t scsz,											// space-size
 	int64_t tm,											// time - nr of generations to evolve
 	int res,											// ca-space-reset-flag
 	int dyrt,											// display-reset-flag
@@ -3762,7 +3777,7 @@ lifeanddrawnewcleanzoom(
 	if (!ds.vlfs || !ds.hlfs)
 		ds.stzm = 0;
 	int tma = 0;										// time available (as stored in pixel buffer)
-	UINT32* pnc = pni;									// pixel-screen cursor / current position 
+	UINT32* pnc = pni;									// pixel-screen cursor / current position
 
 	ds.hlzm = max(1, ds.hlzm);							// make sure zoom-levels are at least 1
 	ds.vlzm = max(1, ds.vlzm);
@@ -3818,7 +3833,7 @@ lifeanddrawnewcleanzoom(
 		int hlsl = 0;											// horizontal scroll
 		///hw = 0;
 				// horizontal scrolling is disabled atm since it does not work together with the histogram
-				// and is only possible when output-width and display-width are the same 
+				// and is only possible when output-width and display-width are the same
 				// if (pbs == plw)
 				//     hlsl = min(plw, (tm % (scsz * vlzm)) / max(1, vlzm * hlzm));				// horizontal scroll / nr. of pixels to scroll
 		if (vlsl * ds.plw < pni - pnv) {
@@ -3910,7 +3925,7 @@ lifeanddrawnewcleanzoom(
 					CA_CT* ctcsv = NULL;
 					ctcsv = malloc(scsz * sizeof * ctcsv);
 					vba.clsc = ctcsv;
-					(ca_cnsgs[cnmd].scfn)(&vba, cr);
+					(ca_cnsgs[cnmd].scfn)(&vba);
 					vba.clsc = csv;
 					int mcr = memcmp(csv, ctcsv, scsz * sizeof * csv);
 					free(ctcsv);
@@ -3966,7 +3981,7 @@ lifeanddrawnewcleanzoom(
 		tdsctbl = malloc(dyss * sizeof * tdsctbl);
 	}
 	//
-	static double* spt = NULL;								// state position table		
+	static double* spt = NULL;								// state position table
 	static double* svt = NULL;								// state velocity table
 	static int ltdyss = 0;
 	if (ltdyss != dyss) {
@@ -4100,7 +4115,7 @@ lifeanddrawnewcleanzoom(
 				UINT32 rgv = 1;													// range v
 
 				display_hash_array(pbv, pbv, pbi, 1, hc_sl, hc_sn, &mxv, &mnv);
-				
+
 				rgv = mxv - mnv;
 				//double mnlgv = log2((double)mnv);
 				//double mxlgv = log2((double)mxv);
@@ -4242,7 +4257,7 @@ lifeanddrawnewcleanzoom(
 				}
 				// Auto-range delay
 				for (int i = 0; i < dyss; ++i) {
-					//!!!!!!!!!!	 original - should work fine, but need renaming / understanding		
+					//!!!!!!!!!!	 original - should work fine, but need renaming / understanding
 									/*
 									svt[i] = svt[i] - svt[i] * ds.ard + (dsctbl[i] - spt[i]) * ds.arf;
 									spt[i] += svt[i];
@@ -4433,7 +4448,7 @@ ALSO is probably a good way to make it possible to enumerate the background patt
 //	int sc,		/* count of possible cell states */
 //	int rc		/* count of cells which will be randomized (density of random cells); everything else is background (which state is randomly choosen once */
 //	) {
-//	int randmax30bit = (RAND_MAX<<15) | RAND_MAX;	// 
+//	int randmax30bit = (RAND_MAX<<15) | RAND_MAX;	//
 //	int rand30bit = (rand()<<15) | rand();
 //	int ps = log(randmax30bit + 1) / log(sc); // , ipow(sc, rand() % 6; // pattern size
 //	ps = rand() % ps + 1;
@@ -4566,7 +4581,7 @@ CA_MAIN(void) {
 	ds.vlpz = 1;				/* vertical pixel zoom */
 	ds.hlpz = 1;				/* horizontal pixel zoom */
 	ds.sfcmp = 0;
-	ds.hddh = -1;
+	ds.hddh = 0;
 	ds.hdll = 0;
 	ds.mlsc = 0;
 
@@ -5229,7 +5244,7 @@ CA_MAIN(void) {
 									}
 									// spacing
 										// background cells
-									//int bd = pcg32_boundedrand(cr.ncs);								// center 
+									//int bd = pcg32_boundedrand(cr.ncs);								// center
 									//for (int ii = 0; ii < sg; ++ii) {
 									//	if (cc >= ci)
 									//		goto rme;
@@ -5253,7 +5268,7 @@ CA_MAIN(void) {
 											++cc;
 										}
 										// background cells
-										int bd = pcg32_boundedrand(cr.ncs);								// center 
+										int bd = pcg32_boundedrand(cr.ncs);								// center
 										for (int ii = 0; ii < sg; ++ii) {
 											if (cc >= ci)
 												goto rme;
@@ -5273,9 +5288,9 @@ CA_MAIN(void) {
 								//int dy = 32;		// inverse density (1/dy)
 								//while (ca + rg < ca_space + ca_space_sz + 1) {
 								//	printf("rg %d   ca %d\n", rg, ca - ca_space);
-								//	for (CA_CT *cs = ca + rg / dy; ca < cs; ++ca)				// fill 
+								//	for (CA_CT *cs = ca + rg / dy; ca < cs; ++ca)				// fill
 								//		*ca = pcg32_boundedrand(cr.ncs);								// with random cells
-								//	int bd = pcg32_boundedrand(cr.ncs);								// center 
+								//	int bd = pcg32_boundedrand(cr.ncs);								// center
 								//	for (CA_CT *cs = ca + rg / dy; ca < cs; ++ca)			// fill seconde half
 								//		*ca = bd;											// with background-state
 								//	if (rg < dy)
@@ -5412,7 +5427,7 @@ CA_MAIN(void) {
 									if (hct[i].r > HCTBS + 1)	// see above
 										hct[hct[i].r].uc--;
 									hct[i].ln = 0;
-									int rcll = (hct[i].uc & HCLLMK) >> 24;	// recycled-node-level	
+									int rcll = (hct[i].uc & HCLLMK) >> 24;	// recycled-node-level
 									hc_stats[rcll].nc--;
 									hc_stats[rcll].rcct++;
 								}
@@ -5635,7 +5650,8 @@ CA_MAIN(void) {
 					CA_CT* nwsc = NULL;									// new space
 					nwsc = malloc(nwsz * sizeof * nwsc);				// memory allocation for new space
 					if (!nwsc)
-						SIMFW_Die("malloc failed at %s (:%d)\n", __FUNCSIG__, __LINE__);
+// TODO __FUNCSIG__ dows not work with gcc						SIMFW_Die("malloc failed at %s (:%d)\n", __FUNCSIG__, __LINE__);
+						SIMFW_Die("malloc failed at %s (:%d)\n", "__FUNCSIG__", __LINE__);
 					else {
 						memset(nwsc, 0, nwsz * sizeof * nwsc);				// init new space to 0
 						tm = 0;
@@ -5916,14 +5932,14 @@ NEWDIFFUSION() {
 					//
 					//*cfv = log(
 					//	(
-					//		pow(M_E, *(cc - W)) + 
+					//		pow(M_E, *(cc - W)) +
 					//		pow(M_E, *(cc - 1)) +
 					//		pow(M_E, *(cc + 1)) +
 					//		pow(M_E, *(cc + W))
 					//	) / 4.0
 					//	);
 					// drawing
-					double lv = (*cc); // 
+					double lv = (*cc); //
 					if (lv > mx)
 						mx = lv;
 					//if ((lv) && (lv < mn))
@@ -5954,7 +5970,7 @@ NEWDIFFUSION() {
 		//		*cfv = (*(cc - W) + *(cc - 1) + *(cc + 1) + *(cc + W)) / 4.0;
 		//		// pre-test for new log diffusion
 		//		double df;
-		//		//df = 
+		//		//df =
 		//		//if(*(cc - W) / *cc > )
 
 		//		//

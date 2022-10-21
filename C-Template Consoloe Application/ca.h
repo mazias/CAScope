@@ -39,7 +39,7 @@ extern struct {
 	void		(*scfn)(caBitArray*);					// sync-(ca-space)-function
 }const ca_cnsgs[CM_MAX];
 int64_t CA_CNFN_OPENCL(int64_t pgnc,caBitArray *vba);
-#if ENABLE_CL 
+#if ENABLE_CL
 void OCLCA_RunVBA(int gnc,int res,OCLCA oclca,CA_RULE *cr,caBitArray vba,int sync_memory,cl_uint rg);
 void OCLCA_Run(int ng,int res,OCLCA oclca,CA_RULE *cr,int sync_memory,const CA_CT *clv,const int scsz,const int brsz,cl_uint rg);
 const char *ocl_strerr(int error);
@@ -59,7 +59,8 @@ void CA_SCFN_HASH(caBitArray *vba);
 int64_t CA_CNFN_HASH(int64_t pgnc,caBitArray *vba);
 HCI HC_find_or_add_branch(UINT32 ll,HCI ln,HCI rn,HCI *rt);
 extern int hcfl;
-UINT32 *display_hash_array(UINT32 *pbv,UINT32 *pbf,UINT32 *pbi,UINT32 v,int ll,HCI n,UINT32 *mxv,UINT32 *mnv);
+UINT32 *display_hash_array(UINT32 *pbv,UINT32 *pbf,UINT32 *pbi,UINT32 pv,int pll,HCI n,UINT32 *pmxv,UINT32 *pmnv);
+UINT32 *old_display_hash_array(UINT32 *pbv,UINT32 *pbf,UINT32 *pbi,UINT32 v,int ll,HCI n,UINT32 *mxv,UINT32 *mnv);
 CA_CT *convert_hash_array_to_CA_CT(int ll,HCI n,CA_CT *clv,CA_CT *cli);
 HCI HC_add_node(int ll,HCI n,int *mxll);
 HCI convert_bit_array_to_hash_array(caBitArray *vba,int *ll);
