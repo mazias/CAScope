@@ -2016,7 +2016,7 @@ ca_count__simd(
 	register UINT32* pbc = pbv;							// pixel-buffer cursor / current element
 	register CA_CT* csc = csf;							// cell-space cursor / current element
 	register CA_CT* csk = csc;							// cell-space check position - initialised to equal csc in order to trigger recalculation of csk in count_check
-	register __m256i ymm0;								// used by simd operations
+	__m256i ymm0;								// used by simd operations
 
 	////	register __m256i ymm0;	// running sum
 	////	int mli = 32; // simd loop iterator
