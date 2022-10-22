@@ -1295,129 +1295,118 @@ rt		unless null, will be set to the result node of the found or added branch - g
 returns index of found or added branch - if newly created this will have a uc (usage count) of 0
 */
 	int hcfl = 0; // hash-cell-table-full flag
-HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
-	HCI cm;										// checksum
-	// base / lowest level > result is guaranteed to be present
-	//if (!ll) {
-	//	cm = ((ln<<2) | rn) + 1;
-	//	if (rt)
-	//		*rt = hct[cm].r;
-	//	return cm;
-	//}
+	HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
+		HCI cm;										// checksum
+		// base / lowest level > result is guaranteed to be present
+		//if (!ll) {
+		//	cm = ((ln<<2) | rn) + 1;
+		//	if (rt)
+		//		*rt = hct[cm].r;
+		//	return cm;
+		//}
 
-	// Generate checksum.
-	UINT32 cm32;
-	cm32 = fnv_32_buf(&ln, HCITPBYC, FNV1_32_INIT);
-	cm32 = fnv_32_buf(&rn, HCITPBYC, cm32);
-	cm = ((cm32 >> HCISZPT) ^ cm32);						// Xor-fold 32bit checksum to fit size of hash-table (needed mask is applied in while-loop).
+		// Generate checksum.
+		UINT32 cm32;
+		cm32 = fnv_32_buf(&ln, HCITPBYC, FNV1_32_INIT);
+		cm32 = fnv_32_buf(&rn, HCITPBYC, cm32);
+		cm = ((cm32 >> HCISZPT) ^ cm32);						// Xor-fold 32bit checksum to fit size of hash-table (needed mask is applied in while-loop).
 
-	// Search for checksum.
-	int sc = 0;												// seek-count
-	HCI encm = 0;											// empty-node-checksum
-	UINT32 enll = 0;										// empty-node-level
-	while (1) {
-		++sc;
-		cm &= HCIMASK;
-		cm = max(1 + HCTBS, cm);							// index can never be 0 or one of the base nodes of level 0
-		if (!ll) {											// nodes on level 0 are expected to be present and search at level 0 would produce errors
-			hc_stats[0].fc++;
-			break;
-		}
-		// Is the index occupied (ln != 0)?
-		if (hct[cm].ln) {
-			// Searched node found
-			if (hct[cm].ln == ln && hct[cm].rn == rn) {
+		// Search for checksum.
+		int sc = 0;												// seek-count
+		HCI encm = 0;											// empty-node-checksum
+		UINT32 enll = 0;										// empty-node-level
+		while (1) {
+			++sc;
+			cm &= HCIMASK;
+			cm = max(1 + HCTBS, cm);							// index can never be 0 or one of the base nodes of level 0
+			if (!ll) {											// nodes on level 0 are expected to be present and search at level 0 would produce errors
+				hc_stats[0].fc++;
+				break;
+			}
+			// Is the index occupied (ln != 0)? 
+			if (hct[cm].ln) {
+				// Searched node found
+				if (hct[cm].ln == ln && hct[cm].rn == rn) {
+					hc_stats[ll].fc++;
+					break;
+				}
+				else {
+					UINT32 cnll = (hct[cm].uc & HCLLMK) >> 24;	// current-node-level
+					// Unused node found at checksum-index > recycle (delete unused node)
+					if ((!encm || cnll > enll) && (hct[cm].uc & HCUCMK) == 0) {
+						encm = cm;
+						enll = cnll;
+					}
+				}
+			}
+			//
+			if (encm && sc > HCMXSC) {
+				cm = encm;
+				if (hct[cm].ln > HCTBS + 1);	// TODO it should be possible to do this without the check, when uc is set on 1 (pos. 0) and basic nodes
+				hct[hct[cm].ln].uc--;
+				if (hct[cm].rn > HCTBS + 1);	// see above
+				hct[hct[cm].rn].uc--;
+				if (hct[cm].r > HCTBS + 1);		// see above
+				hct[hct[cm].r].uc--;
+				hct[cm].ln = 0;
+				int rcll = (hct[cm].uc & HCLLMK) >> 24;	// recycled-node-level	
+				hc_stats[rcll].nc--;
+				hc_stats[rcll].rcct++;
+			}
+			// Hashtable at checksum-index is empty > add new entry
+			if (!hct[cm].ln) {
+				hc_stats[ll].nc++;
+				hc_stats[ll].adct++;
+				// Add new branch / entry to hashtable
+				hct[cm].uc = ((UINT32)ll << 24) | 1;
+				hct[cm].ln = ln;
+				hct[cm].rn = rn;
+				hct[ln].uc++;
+				hct[rn].uc++;
+				// Query result node - first pass.
+				HCI fm, fmr, sl, slr, sr, srr, tb;
+				fm = HC_find_or_add_branch(ll - 1, hct[ln].rn, hct[rn].ln, &fmr); // middle-result
+				hct[fm].uc++;
+				// Second pass.
+				sl = HC_find_or_add_branch(ll - 1, hct[ln].r, fmr, &slr);
+				hct[sl].uc++;
+				sr = HC_find_or_add_branch(ll - 1, fmr, hct[rn].r, &srr);
+				hct[sr].uc++;
+				// Third pass.
+				tb = HC_find_or_add_branch(ll - 1, slr, srr, NULL);
+				hct[cm].r = tb;
+				hct[tb].uc++;
+				hct[fm].uc--;
+				hct[sl].uc--;
+				hct[sr].uc--;
+				hct[cm].uc &= HCLLMK;	// set usage-count to 0 but keep level
+				break;
+			}
+			++cm;
+			// hashtable size warning
+			//if (sc >= 255) {
+			//	printf("WARNING! Hash-table-size low, seek-count at %d\n", sc);
+			//}
+			// hashtable size to big > abort
+			hcfl++;
+			if (hcfl >= HCISZ << 2) {
+				cm = hc_ens[ll];		// return empty node as result
 				hc_stats[ll].fc++;
 				break;
 			}
-			else {
-				UINT32 cnll = (hct[cm].uc & HCLLMK) >> 24;	// current-node-level
-				// Unused node found at checksum-index > recycle (delete unused node)
-				if ((!encm || cnll > enll) && (hct[cm].uc & HCUCMK) == 0) {
-					encm = cm;
-					enll = cnll;
-				}
-			}
+			//// Hashtable is full!
+			//if (sc >= HCISZ) {
+			//	printf("ERROR! hash table at level %d is full with %d cm %08X  HCISZ %d (press any key)\n", ll, sc, cm, HCISZ);
+			//	getch();
+			//	break;
+			//}
 		}
+		// Update stats.
+		hc_stats[ll].sc++;
+		hc_stats[ll].ss += sc;
 		//
-		if (encm && sc > HCMXSC) {
-			cm = encm;
-			if (hct[cm].ln > HCTBS + 1);	// TODO it should be possible to do this without the check, when uc is set on 1 (pos. 0) and basic nodes
-				hct[hct[cm].ln].uc--;
-			if (hct[cm].rn > HCTBS + 1);	// see above
-				hct[hct[cm].rn].uc--;
-			if (hct[cm].r > HCTBS + 1);		// see above
-				hct[hct[cm].r].uc--;
-			hct[cm].ln = 0;
-			int rcll = (hct[cm].uc & HCLLMK) >> 24;	// recycled-node-level
-			hc_stats[rcll].nc--;
-			hc_stats[rcll].rcct++;
-		}
-		// Hashtable at checksum-index is empty > add new entry
-		if (!hct[cm].ln) {
-			hc_stats[ll].nc++;
-			hc_stats[ll].adct++;
-			// Add new branch / entry to hashtable
-			hct[cm].uc = ((UINT32)ll << 24) | 1;
-			hct[cm].ln = ln;
-			hct[cm].rn = rn;
-			hct[ln].uc++;
-			hct[rn].uc++;
-			// Query result node - first pass.
-			HCI fm, fmr, sl, slr, sr, srr, tb;
-			fm = HC_find_or_add_branch(ll - 1, hct[ln].rn, hct[rn].ln, &fmr); // middle-result
-			hct[fm].uc++;
-			// Second pass.
-			sl = HC_find_or_add_branch(ll - 1, hct[ln].r, fmr, &slr);
-			hct[sl].uc++;
-			sr = HC_find_or_add_branch(ll - 1, fmr, hct[rn].r, &srr);
-			hct[sr].uc++;
-			// Third pass.
-			tb = HC_find_or_add_branch(ll - 1, slr, srr, NULL);
-			hct[cm].r = tb;
-			hct[tb].uc++;
-			hct[fm].uc--;
-			hct[sl].uc--;
-			hct[sr].uc--;
-			hct[cm].uc &= HCLLMK;	// set usage-count to 0 but keep level
-			if ((hct[ln].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[ln].uc & HCUCMK;
-			if ((hct[rn].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[rn].uc & HCUCMK;
-			if ((hct[tb].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[tb].uc & HCUCMK;
-			//hc_stats[ll - 1].ucmx = max(
-			//	hc_stats[ll - 1].ucmx,
-			//	max(
-			//		hct[ln].uc,
-			//		max(
-			//			hct[rn].uc,
-			//			hct[tb].uc)));
-
-			break;
-		}
-		++cm;
-		// hashtable size warning
-		//if (sc >= 255) {
-		//	printf("WARNING! Hash-table-size low, seek-count at %d\n", sc);
-		//}
-		// hashtable size to big > abort
-		hcfl++;
-		if (hcfl >= HCISZ << 2) {
-			cm = hc_ens[ll];		// return empty node as result
-			hc_stats[ll].fc++;
-			break;
-		}
-		//// Hashtable is full!
-		//if (sc >= HCISZ) {
-		//	printf("ERROR! hash table at level %d is full with %d cm %08X  HCISZ %d (press any key)\n", ll, sc, cm, HCISZ);
-		//	getch();
-		//	break;
-		//}
-	}
-	// Update stats.
-	hc_stats[ll].sc++;
-	hc_stats[ll].ss += sc;
-	//
-	if (rt)
-		*rt = hct[cm].r;
+		if (rt)
+			*rt = hct[cm].r;
 
 	return cm;
 }
