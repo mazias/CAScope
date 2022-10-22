@@ -1164,8 +1164,6 @@ HC_STATS {
 	int ss;									// seek-sum (can be used with sc to calculate average seek-time)
 	int rcct;								// recycled-count
 	int adct;								// added-count
-	int ucmn;								// uinque-count minimum
-	int ucmx;								// unique-count maximum
 } HC_STATS;
 HC_STATS hc_stats[HCTMXLV] = { 0 };
 
@@ -1173,8 +1171,8 @@ void HC_print_stats() {
 	// display stats
 	memset(&hc_stats[HCTMXLV - 1], 0, sizeof(hc_stats[HCTMXLV - 1]));	// reset sums
 	printf("-\n");
-	printf(" ll  %8s %4s  %8s %7s  %8s  %8s  %8s %4s  %9s %9s  %8s  ll\n",
-		"nc", "%", "sc", "fc%", "rqct", "adct", "seeks", "avgsk", "ucmn", "ucmx", "size");
+	printf(" ll  %8s %4s  %8s %7s  %8s  %8s  %8s %4s  %8s  ll\n",
+		"nc", "%", "sc", "fc%", "rqct", "adct", "seeks", "avgsk", "size");
 	static HC_STATS sl = { 0 };		// stats-last
 	HC_STATS sd = { 0 }; // stats-delta
 	for (int i = 0; i < HCTMXLV; ++i) {
@@ -1187,9 +1185,6 @@ void HC_print_stats() {
 			hc_stats[HCTMXLV - 1].rcct += hc_stats[i].rcct;
 			hc_stats[HCTMXLV - 1].adct += hc_stats[i].adct;
 			hc_stats[HCTMXLV - 1].ss += hc_stats[i].ss;
-			if (hc_stats[i].ucmn < hc_stats[HCTMXLV - 1].ucmn || !hc_stats[HCTMXLV - 1].ucmn)
-				hc_stats[HCTMXLV - 1].ucmn = hc_stats[i].ucmn;
-			hc_stats[HCTMXLV - 1].ucmx = max(hc_stats[i].ucmx, hc_stats[HCTMXLV - 1].ucmx);
 		}
 		else if (i == HCTMXLV - 2) {
 			sd.rcct = hc_stats[HCTMXLV - 1].rcct - sl.rcct;
@@ -1205,7 +1200,7 @@ void HC_print_stats() {
 		else
 			printf("=== SUM%93s\n", "");
 
-		printf("%3d  %8.2e %3.0f%%  %8.2e %6.2f%%  %8.2e  %8.2e  %8.2e %5.2f  %9d %9d  %8.2e  %2d\n",
+		printf("%3d  %8.2e %3.0f%%  %8.2e %6.2f%%  %8.2e  %8.2e  %8.2e %5.2f  %8.2e  %2d\n",
 			i,
 			(double)hc_stats[i].nc,
 			(100.0 / (double)HCISZ * (double)hc_stats[i].nc),
@@ -1215,8 +1210,6 @@ void HC_print_stats() {
 			(double)hc_stats[i].adct,
 			(double)hc_stats[i].ss,
 			(double)hc_stats[i].ss / max(1.0, abs((double)hc_stats[i].sc)),
-			hc_stats[i].ucmn,
-			hc_stats[i].ucmx,
 			(double)((UINT64)HCTBS << i),
 			i);
 	}
@@ -1406,12 +1399,14 @@ UINT32* old_display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, 
 
 //__declspec(noinline)
 UINT32* 
-display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 pv, int pll, HCI n, UINT32* pmxv, UINT32* pmnv) {
+display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, int pll, HCI n, UINT32* pmxv, UINT32* pmnv) {
 //	printf("xxx");
 	int hpn[HCTMXLV] = { 0 };		// heap-node
 	char hplnd[HCTMXLV] = { 0 };		// heap-left-node-done
-	int hpv[HCTMXLV] = { 0 };		// heap-value
-	UINT32 v = pv;
+//	double hpv[HCTMXLV] = { 0 };		// heap-value
+	UINT32 hpv[HCTMXLV] = { 0 };		// heap-value
+//	double v = 1;
+	UINT32 v = 1;
 	UINT32 ll = pll;
 
 	int hddh = ds.hddh;
@@ -1423,8 +1418,10 @@ display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 pv, int pll, HC
 	//printf("%d %d, ", ll, pll);
 	while (ll <= pll) {
 		if (hddh >= 0) {
-			if (ll <= hc_sl - (hddh + hdll))
-				v += (hct[n].uc & HCUCMK);
+			if (ll <= hc_sl - (hddh + hdll)) {
+//				v *= max(1, (hct[n].uc & HCUCMK));
+				v += hct[n].uc & HCUCMK;
+			}
 		}
 		else {
 			if (ll == hddh * -1 - 1 + hdll)
@@ -1432,6 +1429,7 @@ display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 pv, int pll, HC
 		}
 
 		if (ll <= hdll) {
+//			v = log2(v) / 256.0 * (double)MAXUINT32;
 			if (v > mxv)
 				mxv = v;
 			if (v < mnv)
@@ -1567,17 +1565,6 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 			hct[sl].uc--;
 			hct[sr].uc--;
 			hct[cm].uc &= HCLLMK;	// set usage-count to 0 but keep level
-			if ((hct[ln].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[ln].uc & HCUCMK;
-			if ((hct[rn].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[rn].uc & HCUCMK;
-			if ((hct[tb].uc & HCUCMK) > hc_stats[ll - 1].ucmx) hc_stats[ll - 1].ucmx = hct[tb].uc & HCUCMK;
-			//hc_stats[ll - 1].ucmx = max(
-			//	hc_stats[ll - 1].ucmx,
-			//	max(
-			//		hct[ln].uc,
-			//		max(
-			//			hct[rn].uc,
-			//			hct[tb].uc)));
-
 			break;
 		}
 		++cm;
@@ -4099,9 +4086,9 @@ lifeanddrawnewcleanzoom(
 				UINT32 mnv = 0;													// min v
 				UINT32 rgv = 1;													// range v
 
-				display_hash_array(pbv, pbv, pbi, 1, hc_sl, hc_sn, &mxv, &mnv);
+				display_hash_array(pbv, pbv, pbi, hc_sl, hc_sn, &mxv, &mnv);
 				
-				rgv = mxv - mnv;
+				rgv = max(1, mxv - mnv);
 				//double mnlgv = log2((double)mnv);
 				//double mxlgv = log2((double)mxv);
 				double mnlgv;
@@ -4113,7 +4100,8 @@ lifeanddrawnewcleanzoom(
 					rglgv = max(1.0, mxlgv - mnlgv);
 				}
 
-				//printf("mnv %u  mxv %u   fxlgmnv %f  fxlgmxv %f   lgmnv %f  lgmxv %f\n", mnv, mxv, mnlgv, mxlgv, log2(mnv), log2(mxv));
+				if (!(rand()%10))
+					printf("mnv %u  mxv %u   fxlgmnv %f  fxlgmxv %f   lgmnv %f  lgmxv %f\n", mnv, mxv, mnlgv, mxlgv, log2(mnv), log2(mxv));
 
 				double v;
 				UINT32 lpbc = *pbc + 1, lcol = 0;
