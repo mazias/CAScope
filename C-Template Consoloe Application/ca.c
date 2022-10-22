@@ -793,9 +793,7 @@ int64_t CA_CNFN_VBA_1x256(int64_t gnc, caBitArray* vba) {
 }
 
 int64_t CA_CNFN_OMP_TEST(int64_t gnc, caBitArray* vba) {
-    /*
-	* TODO does not work with gcc
-///	omp_set_num_threads(1 << vba->bcpt);
+	omp_set_num_threads(1 << vba->bcpt);
 
 	convertBetweenCACTandCABitArray(vba, 0);
 
@@ -810,7 +808,7 @@ int64_t CA_CNFN_OMP_TEST(int64_t gnc, caBitArray* vba) {
 	#pragma omp parallel default(none) shared(vba) firstprivate(v, bh, oc, gnc)
 	//		for (int bkcr = 0; bkcr < 1 << vba->bcpt; bkcr++)
 	{
-///		int bkcr = omp_get_thread_num();
+		int bkcr = omp_get_thread_num();
 //		printf("thread #%d\n", bkcr);
 		while (gnc > 0) {
 			gnc -= 2;
@@ -886,7 +884,7 @@ int64_t CA_CNFN_OMP_TEST(int64_t gnc, caBitArray* vba) {
 	//ymm0 = _mm256_xor_si256(ymm0, ymm1);
 
 	//_mm256_store_si256(vbac + ri, ymm0);
-	*/
+
 }
 
 int64_t CA_CNFN_VBA_16x256(int64_t pgnc, caBitArray* vba) {
@@ -1323,7 +1321,7 @@ returns index of found or added branch - if newly created this will have a uc (u
 				hc_stats[0].fc++;
 				break;
 			}
-			// Is the index occupied (ln != 0)? 
+			// Is the index occupied (ln != 0)?
 			if (hct[cm].ln) {
 				// Searched node found
 				if (hct[cm].ln == ln && hct[cm].rn == rn) {
@@ -1349,7 +1347,7 @@ returns index of found or added branch - if newly created this will have a uc (u
 				if (hct[cm].r > HCTBS + 1);		// see above
 				hct[hct[cm].r].uc--;
 				hct[cm].ln = 0;
-				int rcll = (hct[cm].uc & HCLLMK) >> 24;	// recycled-node-level	
+				int rcll = (hct[cm].uc & HCLLMK) >> 24;	// recycled-node-level
 				hc_stats[rcll].nc--;
 				hc_stats[rcll].rcct++;
 			}
@@ -1614,7 +1612,7 @@ UINT32* old_display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, 
 }
 
 //__declspec(noinline)
-UINT32* 
+UINT32*
 display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, int pll, HCI n, UINT32* pmxv, UINT32* pmnv) {
 //	printf("xxx");
 	int hpn[HCTMXLV] = { 0 };		// heap-node
@@ -4103,7 +4101,7 @@ lifeanddrawnewcleanzoom(
 				UINT32 rgv = 1;													// range v
 
 				display_hash_array(pbv, pbv, pbi, hc_sl, hc_sn, &mxv, &mnv);
-				
+
 				rgv = max(1, mxv - mnv);
 				//double mnlgv = log2((double)mnv);
 				//double mxlgv = log2((double)mxv);
@@ -4116,8 +4114,8 @@ lifeanddrawnewcleanzoom(
 					rglgv = max(1.0, mxlgv - mnlgv);
 				}
 
-				if (!(rand()%10))
-					printf("mnv %u  mxv %u   fxlgmnv %f  fxlgmxv %f   lgmnv %f  lgmxv %f\n", mnv, mxv, mnlgv, mxlgv, log2(mnv), log2(mxv));
+				//if (!(rand()%10))
+				//	printf("mnv %u  mxv %u   fxlgmnv %f  fxlgmxv %f   lgmnv %f  lgmxv %f\n", mnv, mxv, mnlgv, mxlgv, log2(mnv), log2(mxv));
 
 				double v;
 				UINT32 lpbc = *pbc + 1, lcol = 0;

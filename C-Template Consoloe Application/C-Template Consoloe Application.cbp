@@ -14,7 +14,6 @@
 				<Option type="1" />
 				<Option compiler="gcc" />
 				<Compiler>
-					<Add option="-march=native" />
 					<Add option="-O1" />
 					<Add option="-m64" />
 					<Add option="-DWIN32" />
@@ -42,7 +41,6 @@
 				<Option type="1" />
 				<Option compiler="gcc" />
 				<Compiler>
-					<Add option="-march=native" />
 					<Add option="-O1" />
 					<Add option="-m32" />
 					<Add option="-DWIN32" />
@@ -68,9 +66,12 @@
 			<Add option="-flto" />
 			<Add option="-O3" />
 			<Add option="-Wall" />
+			<Add option="-fopenmp" />
+			<Add option="-march=native" />
 		</Compiler>
 		<Linker>
 			<Add option="-flto" />
+			<Add option="-fopenmp" />
 		</Linker>
 		<Unit filename="ca.c">
 			<Option compilerVar="CC" />
