@@ -15,7 +15,7 @@ struct tagSIMFW_KeyBinding {
 	double max;
 	double def;		// default
 	double step; // step
-	enum { KBVT_INT, KBVT_INT64, KBVT_DOUBLE} val_type;
+	enum {KBVT_INT, KBVT_INT64, KBVT_DOUBLE} val_type;
 	void* val;
 	int* cgfg;	// change-flag - is set to one if val changed
 	int wpad;	// wrap-around
