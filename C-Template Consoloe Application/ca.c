@@ -1632,7 +1632,7 @@ display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, int pll, HCI n, UINT32
 	//printf("%d %d, ", ll, pll);
 	while (ll <= pll) {
 		if (hddh >= 0) {
-			if (ll <= hc_sl - (hddh + hdll)) {
+			if (ll >= hddh + hdll) {
 //				v *= max(1, (hct[n].uc & HCUCMK));
 				v += hct[n].uc & HCUCMK;
 			}
@@ -1909,6 +1909,12 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 
 /************************* Routines operating directly on (byte-based) cell-space *************************/
 
+/* portable way to use visual studio like union acessors in gcc */
+typedef union __m256i_u8 {
+    __m256i m256i;
+    UINT8   m256i_u8[32];
+} __m256i_u8;
+
 /* Calculate next generation - CAN ONLY HANDLE TOTALISTIC ATM, ncn fixed */
 void
 ca_next_gen_ncn3_simd(
@@ -1917,19 +1923,16 @@ ca_next_gen_ncn3_simd(
 	CA_CT* cli											// cell-line first invalid element
 ) {
 	while (clv < cli) {
-		__m256i ymm0 = _mm256_loadu_si256(clv);
-		//_mm256_sll // shift?
-		//_mm256_slli_si256
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 1));
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 2));
+		__m256i_u8 ymm0;
+		ymm0.m256i = _mm256_loadu_si256(clv);
+		ymm0.m256i = _mm256_adds_epu8(ymm0.m256i, *(__m256i*)(clv + 1));
+		ymm0.m256i = _mm256_adds_epu8(ymm0.m256i, *(__m256i*)(clv + 2));
 		for (int i = 0; i < 32; i += 4)
-			// TODO check correctnes
-			// all forms of ymm0.m256i_u8[i + 0] rewritten to ((UINT8*)&ymm0)[i + 0] to work with gcc
-			((UINT8*)&ymm0)[i + 0] = cr->rltl[((UINT8*)&ymm0)[i + 0]],
-			((UINT8*)&ymm0)[i + 1] = cr->rltl[((UINT8*)&ymm0)[i + 1]],
-			((UINT8*)&ymm0)[i + 2] = cr->rltl[((UINT8*)&ymm0)[i + 2]],
-			((UINT8*)&ymm0)[i + 3] = cr->rltl[((UINT8*)&ymm0)[i + 3]];
-		_mm256_storeu_si256(clv, ymm0);
+			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
+			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
+			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
+			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
+		_mm256_storeu_si256(clv, ymm0.m256i);
 		clv += 32;
 	}
 }
@@ -1942,30 +1945,19 @@ ca_next_gen_abs_ncn3_ncs2_simd(
 	CA_CT* cli											// cell-line first invalid element
 ) {
 	while (clv < cli) {
-		__m256i ymm0 = _mm256_loadu_si256(clv);
-		ymm0 = _mm256_slli_epi64(ymm0, 1);					// shift one bit to the left
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 1));
-		ymm0 = _mm256_slli_epi64(ymm0, 1);					// shift one bit to the left
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 2));
-
-
-		/*
-		//old code using propably not optimal method for shifting
-		__m256i ymm0 = _mm256_loadu_si256(clv);
-		__m128i xmm0 = _mm_setzero_si128();
-		xmm0.m128i_i64[0] = 1;
-		ymm0 = _mm256_sll_epi64(ymm0, xmm0);		// shift one bit to the left
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 1));
-		ymm0 = _mm256_sll_epi64(ymm0, xmm0);		// shift one bit to the left
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + 2));
-		*/
+		__m256i_u8 ymm0;
+		ymm0.m256i = _mm256_loadu_si256(clv);
+		ymm0.m256i = _mm256_slli_epi64(ymm0.m256i, 1);					// shift one bit to the left
+		ymm0.m256i = _mm256_adds_epu8(ymm0.m256i, *(__m256i*)(clv + 1));
+		ymm0.m256i = _mm256_slli_epi64(ymm0.m256i, 1);					// shift one bit to the left
+		ymm0.m256i = _mm256_adds_epu8(ymm0.m256i, *(__m256i*)(clv + 2));
 
 		for (int i = 0; i < 32; i += 4)
-			((UINT8*)&ymm0)[i + 0] = cr->rltl[((UINT8*)&ymm0)[i + 0]],
-			((UINT8*)&ymm0)[i + 1] = cr->rltl[((UINT8*)&ymm0)[i + 1]],
-			((UINT8*)&ymm0)[i + 2] = cr->rltl[((UINT8*)&ymm0)[i + 2]],
-			((UINT8*)&ymm0)[i + 3] = cr->rltl[((UINT8*)&ymm0)[i + 3]];
-		_mm256_storeu_si256(clv, ymm0);
+			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
+			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
+			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
+			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
+		_mm256_storeu_si256(clv, ymm0.m256i);
 		clv += 32;
 	}
 }
@@ -2016,7 +2008,7 @@ ca_count__simd(
 	register UINT32* pbc = pbv;							// pixel-buffer cursor / current element
 	register CA_CT* csc = csf;							// cell-space cursor / current element
 	register CA_CT* csk = csc;							// cell-space check position - initialised to equal csc in order to trigger recalculation of csk in count_check
-	__m256i ymm0;								// used by simd operations
+	__m256i_u8 ymm0;						    		// used by simd operations
 
 	////	register __m256i ymm0;	// running sum
 	////	int mli = 32; // simd loop iterator
@@ -2054,12 +2046,11 @@ count_simd:;
 		goto count_sisd;
 	if (csc >= csk)
 		goto count_check;
-	ymm0 = _mm256_loadu_si256(csc);
+	ymm0.m256i = _mm256_loadu_si256(csc);
 	for (i = 1; i < hlfs; ++i)
-		ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(csc + i));
+		ymm0.m256i = _mm256_adds_epu8(ymm0.m256i, *(__m256i*)(csc + i));
 	for (i = 0; i < 32; i += hlzm) {
-		// *pbc = ymm0.m256i_u8[i];
-		*pbc = ((UINT8*)&ymm0)[i];
+		*pbc = ymm0.m256i_u8[i];
 		++pbc;
 		csc += hlzm;
 	}
@@ -2144,15 +2135,16 @@ ca_next_gen__simd(
 	CA_CT* cli		// cell-line first invalid element
 ) {
 	while (clv < cli) {
-		__m256i ymm0 = _mm256_loadu_si256(clv);
+		__m256i_u8 ymm0;
+		ymm0.m256i = _mm256_loadu_si256(clv);
 		for (int i = 1; i < cr->ncn; ++i)
-			ymm0 = _mm256_adds_epu8(ymm0, *(__m256i*)(clv + i));
+			ymm0.m256i = _mm256_adds_epu8(ymm0.m256i, *(__m256i*)(clv + i));
 		for (int i = 0; i < 32; i += 4)
-			((UINT8*)&ymm0)[i + 0] = cr->rltl[((UINT8*)&ymm0)[i + 0]],
-			((UINT8*)&ymm0)[i + 1] = cr->rltl[((UINT8*)&ymm0)[i + 1]],
-			((UINT8*)&ymm0)[i + 2] = cr->rltl[((UINT8*)&ymm0)[i + 2]],
-			((UINT8*)&ymm0)[i + 3] = cr->rltl[((UINT8*)&ymm0)[i + 3]];
-		_mm256_storeu_si256(clv, ymm0);
+			ymm0.m256i_u8[i + 0] = cr->rltl[ymm0.m256i_u8[i + 0]],
+			ymm0.m256i_u8[i + 1] = cr->rltl[ymm0.m256i_u8[i + 1]],
+			ymm0.m256i_u8[i + 2] = cr->rltl[ymm0.m256i_u8[i + 2]],
+			ymm0.m256i_u8[i + 3] = cr->rltl[ymm0.m256i_u8[i + 3]];
+		_mm256_storeu_si256(clv, ymm0.m256i);
 		clv += 32;
 	}
 }
