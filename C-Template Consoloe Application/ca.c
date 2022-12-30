@@ -4469,8 +4469,70 @@ ALSO is probably a good way to make it possible to enumerate the background patt
 //	}
 //}
 
+/*
+
+rs		nr. of randomized cells
+zero_position		flag - if set position of random cells is always 0, otherwise random
+
+*/
 void
-CA_RandomizeSpace(
+CA_RandomizeHashSpace(int rs, int zero_position)
+{
+	//assert(HCTBSPT == 2 && "HCTBSPT must be 2"); // TODO why does this not compile???
+	SIMFW_SetFlushMsg(&sfw, "hash-cells random size  %d  (use ctl to select leftmost node)\n", rs);
+	memset(&hcls, 0, sizeof(hcls));				// reset hash-cells-set (even if this probably may not be necesary)
+	// create a random hash-node of given size
+	HCI rmnd;									// current random-node (and last-node after the for-loop is done)
+	int ml = 0;									// max-level
+	for (int i = 0; i < rs; i += HCTBS) {		// generate rs-number of random cells
+		uint32_t rbs = pcg32_random();			// generate 32 bits of randomnes
+		int l = 0;								// level
+		rmnd = HC_add_node(0, 1 + ((rbs >> 0) & 0x3), &l);
+		rmnd = HC_add_node(0, 1 + ((rbs >> 2) & 0x3), &l);
+		if (l > ml)
+			ml = l;
+	}
+	if (ml)										// ml should not be zero, since we never want to set the usage-count of a base (level 0) node to zero, as otherwise it would be recycled/reused at some point
+		hct[rmnd].uc &= HCLLMK;					// set usage-count to zero but keep value of level (see notes on HC_add_node on why this is done)
+	// select a random node the same level as ml
+	HCI hcbt[HCTMXLV] = { 0 };					// hash-node-backtrack array
+	int hcbtln[HCTMXLV] = { 0 };				// hash-node-backtrack-left-node-taken array
+	int bti = 0;								// backtrack-index
+	HCI cn = hc_sn;								// current node
+	int cl = hc_sl;								// current level
+	while (cl > ml) {
+		// remember path taken
+		hcbt[bti] = cn;
+		// randomly select left or right node
+		cl--;
+		if (zero_position || (pcg32_random() & 1)) {
+			cn = hct[cn].ln;
+			hcbtln[bti] = 1;
+		}
+		else
+			cn = hct[cn].rn;
+		bti++;
+	}
+	// exchange selected node with the randomly created note and update all parent nodes
+	cn = rmnd;
+	for (int i = bti - 1; i >= 0; i--) {
+		cl++;
+		HCI tcn = cn;
+		hct[cn].uc++;
+		if (hcbtln[i])
+			cn = HC_find_or_add_branch(cl, cn, hct[hcbt[i]].rn, NULL);
+		else
+			cn = HC_find_or_add_branch(cl, hct[hcbt[i]].ln, cn, NULL);
+		hct[tcn].uc--;
+		//
+	}
+	// hct[hc_sn].uc--;
+	hc_sn = cn;
+	// hct[hc_sn].uc++;
+}
+
+void
+CA_RandomizeLinearSpace(
 	CA_CT* spc,
 	int spcsz,
 	int sc,		/* count of possible cell states */
@@ -4482,6 +4544,10 @@ CA_RandomizeSpace(
 	}
 	CA_CT* pa;							// pattern array
 	pa = malloc(ps * sizeof(*pa));		// allocate memory for pattern array
+	if (pa == NULL) {
+		SIMFW_Die("malloc failed at %s (:%d)\n", "__FUNCSIG__", __LINE__);		// TODO - check if funcsig works with gcc
+		return;
+	}
 	for (int i = 0; i < ps; ++i)		// create random pattern
 		pa[i] = pcg32_boundedrand(sc);
 
@@ -4493,13 +4559,14 @@ CA_RandomizeSpace(
 	printf("\tspace size / pattern size  %d %% %d\n", spcsz / ps, spcsz % ps);
 	printf("\tpattern  ");
 	for (int i = 0; i < ps; ++i)
-		printf("%u", pa[i]);
+		printf("%c", pa[i]);
 	printf("\n");
+	SIMFW_SetFlushMsg(&sfw, "randomize linear space\nrandomized cells %d\npattern size %d", rc, ps);
 
-	/* Cretae randomized space */
+	/* Crete randomized space */
 	register CA_CT* psn = spc;					// position
 	register CA_CT* bdr = spc + spcsz;			// border
-	register int pc = 0;						// pattern cursor
+	register int pc = 0;						// pattern-cursor
 	while (psn < bdr) {
 		if (pcg32_boundedrand(spcsz) < rc)
 			*psn = pcg32_boundedrand(sc);
@@ -4914,9 +4981,8 @@ CA_MAIN(void) {
 	// file not found - create cellspace manually
 	else {
 		ca_space = malloc(ca_space_sz * sizeof *ca_space);
-		for (int i = 0; i < ca_space_sz; i++) {
-			ca_space[i] = 0;
-		}
+		memset(ca_space, 0, ca_space_sz * sizeof *ca_space);
+
 		///	ca_space[ca_space_sz / 2] = 1;
 		ca_space[0] = 1;
 		ca_space[1] = 1;
@@ -4946,10 +5012,10 @@ CA_MAIN(void) {
 		while (SDL_PollEvent(&e)) {
 			const UINT8* kbst = SDL_GetKeyboardState(NULL); /* keyboard state */
 			SDL_Keymod kbms = SDL_GetModState(); /* keyboard mod state */
-			int lst = kbst[SDL_SCANCODE_LSHIFT]; // left shift
-			int ctl = kbms & KMOD_CTRL; // ctrl key pressed
-			int alt = kbms & KMOD_ALT; // alt key pressed
-			int sft = kbms & KMOD_SHIFT; // shift key pressed
+			int lst = kbst[SDL_SCANCODE_LSHIFT];			// left shift
+			int ctl = kbms & KMOD_CTRL;						// ctrl key pressed
+			int alt = kbms & KMOD_ALT;						// alt key pressed
+			int sft = kbms & KMOD_SHIFT;					// shift key pressed
 			if (e.type == SDL_QUIT)
 				break;
 			if (e.type == SDL_WINDOWEVENT) {
@@ -4999,8 +5065,6 @@ CA_MAIN(void) {
 				if (e.button.button == 3) {
 					mouse_speed_control = !mouse_speed_control;
 				}
-			}
-			else if (e.type == SDL_WINDOWEVENT_RESIZED) {
 			}
 			else if (e.type == SDL_KEYDOWN) {
 				int keysym = e.key.keysym.sym;
@@ -5116,7 +5180,7 @@ CA_MAIN(void) {
 					if (cd) {
 						keysym = 0;
 						cr = CA_Rule(cr);
-						CA_RandomizeSpace(ca_space, ca_space_sz, cr.ncs, ca_space_sz / ipow(2, pcg32_boundedrand(10)), 3);
+						CA_RandomizeLinearSpace(ca_space, ca_space_sz, cr.ncs, ca_space_sz / ipow(2, pcg32_boundedrand(10)), 3);
 						char buf[10000];
 						CA_RULE_PrintInfo(&cr, &buf, sizeof(buf));
 						SIMFW_SetFlushMsg(&sfw, &buf);
@@ -5126,169 +5190,19 @@ CA_MAIN(void) {
 				/* No control-mode selected */
 				// insert random cells
 				if (keysym >= SDLK_0 && keysym <= SDLK_9) {
-					// special handling if computation-mode is hash
 					if (cnmd == CM_HASH) {
-						//assert(HCTBSPT == 2 && "HCTBSPT must be 2"); // TODO why does this not compile???
 						int rs = HCTBS * ipow(2, min(hc_sl, keysym - SDLK_0));				// random size in nr. of cells
-						SIMFW_SetFlushMsg(&sfw, "hash-cells random size  %d  (use ctl to select leftmost node)\n", rs);
-						memset(&hcls, 0, sizeof(hcls));				// reset hash-cells-set (even if this probably may not be necesary)
-						// create a random hash-node of given size
-						HCI rmnd;									// last-node
-						int ml = 0;									// max-level
-						for (int i = 0; i < rs; i += HCTBS) {
-							uint32_t rbs = pcg32_random();			// generate 32 bits of randomnes
-							int l = 0;								// level
-							rmnd = HC_add_node(0, 1 + ((rbs >> 0) & 0x3), &l);
-							rmnd = HC_add_node(0, 1 + ((rbs >> 2) & 0x3), &l);
-							if (l > ml)
-								ml = l;
-						}
-						if (ml)
-							hct[rmnd].uc &= HCLLMK;						// set usage-count to zero but keep value of level (see notes on HC_add_node on why this is done)
-						// select a random node the same level as ml
-						HCI hcbt[HCTMXLV] = { 0 };					// hash-node-backtrack array
-						int hcbtln[HCTMXLV] = { 0 };				// hash-node-backtrack-left-node-taken array
-						int bti = 0;								// backtrack-index
-						HCI cn = hc_sn;								// current node
-						int cl = hc_sl;								// current level
-						while (cl > ml) {
-							// remember path taken
-							hcbt[bti] = cn;
-							// randomly select left or right node
-							cl--;
-							if (ctl || (pcg32_random() & 1)) {
-								cn = hct[cn].ln;
-								hcbtln[bti] = 1;
-							}
-							else
-								cn = hct[cn].rn;
-							bti++;
-						}
-						// exchange selected node with the randomly created note and update all parent nodes
-						cn = rmnd;
-						for (int i = bti - 1; i >= 0; i--) {
-							cl++;
-							HCI tcn = cn;
-							hct[cn].uc++;
-							if (hcbtln[i])
-								cn = HC_find_or_add_branch(cl, cn, hct[hcbt[i]].rn, NULL);
-							else
-								cn = HC_find_or_add_branch(cl, hct[hcbt[i]].ln, cn, NULL);
-							hct[tcn].uc--;
-							//
-						}
-						// hct[hc_sn].uc--;
-						hc_sn = cn;
-						// hct[hc_sn].uc++;
+						CA_RandomizeHashSpace(rs, ctl);
 					}
 					else {
-						tm = 0;
-						int rcc = 0;							// random cells count
-						int ps = 1;								// pattern size
+						int rcc = ipow(2, keysym - SDLK_0);									// random-cells-count - 0 = 1 random cell, 1 = 2, 2 = 4, 3 = 8, ..., 9 = 512
+						int ps = 1;															// pattern-size (i.e. size of repeating background pattern)
 						if (alt)
 							ps = 0;
-						if (kbms & KMOD_SHIFT)
+						if (sft)
 							// 1 = random cells 10% of width, 2 = 20%, 9 = 90%, 0 = 100%
 							rcc = ca_space_sz * (keysym - SDLK_0 + (keysym == SDLK_0) * 10) / 10;
-						else {
-							// 0 = 1 random cell, 1 = 2, 2 = 4, 3 = 8, ..., 9 = 512
-							rcc = ipow(2, keysym - SDLK_0);
-							if (keysym == SDLK_0)
-								rcc = 0;
-						}
-
-						if (ctl) {
-							// random isles of variing length
-							//int br = pcg32_boundedrand(cr.ncs);
-							//for (int i = 0; i < ca_space_sz; ++i)
-							//	ca_space[i] = br;
-							if (1 || keysym == SDLK_9) {
-								CA_CT* cc = ca_space;
-								CA_CT* ci = ca_space + ca_space_sz;
-								int szsr = keysym - SDLK_0;
-								if (szsr == 0)
-									szsr = 10;
-								szsr *= 64;
-								int sz = ca_space_sz / szsr, sg = sz * 8;
-								while (cc + sz < ci) {
-									int rsz = ceil(log2(sz));
-									printf("rsz %d", rsz);
-									rsz = pcg32_boundedrand(rsz) + 2;
-									rsz = ipow(2, rsz);
-									printf("/%d\n", rsz);
-									// random cells
-									for (int i = 0; i < rsz; ++i) {
-										*cc = pcg32_boundedrand(cr.ncs);
-										++cc;
-									}
-									// spacing
-										// background cells
-									//int bd = pcg32_boundedrand(cr.ncs);								// center
-									//for (int ii = 0; ii < sg; ++ii) {
-									//	if (cc >= ci)
-									//		goto rme;
-									//	*cc = bd;
-									//	++cc;
-									//}
-									cc += sg;
-								}
-							}
-							else if (keysym == SDLK_0) {
-								CA_CT* cc = ca_space;
-								CA_CT* ci = ca_space + ca_space_sz;
-								int rg = 10, sg = rg * 10, ct = 100;
-								while (1) {
-									for (int i = 0; i < ct; ++i) {
-										// random cells
-										for (int ii = 0; ii < rg; ++ii) {
-											if (cc >= ci)
-												goto rme;
-											*cc = pcg32_boundedrand(cr.ncs);
-											++cc;
-										}
-										// background cells
-										int bd = pcg32_boundedrand(cr.ncs);								// center
-										for (int ii = 0; ii < sg; ++ii) {
-											if (cc >= ci)
-												goto rme;
-											*cc = bd;
-											++cc;
-										}
-									}
-									//
-									rg *= 2;
-									sg *= 2;
-									ct = max(1, ct / 2);
-								}
-							rme:;
-
-								//CA_CT *ca = ca_space;
-								//int rg = ca_space_sz;
-								//int dy = 32;		// inverse density (1/dy)
-								//while (ca + rg < ca_space + ca_space_sz + 1) {
-								//	printf("rg %d   ca %d\n", rg, ca - ca_space);
-								//	for (CA_CT *cs = ca + rg / dy; ca < cs; ++ca)				// fill
-								//		*ca = pcg32_boundedrand(cr.ncs);								// with random cells
-								//	int bd = pcg32_boundedrand(cr.ncs);								// center
-								//	for (CA_CT *cs = ca + rg / dy; ca < cs; ++ca)			// fill seconde half
-								//		*ca = bd;											// with background-state
-								//	if (rg < dy)
-								//		break;
-								//	rg = rg - rg / dy * 2;
-								//}
-							}
-							else {
-								for (int i = 0; i < keysym - SDLK_0 + 1; ++i) {
-									int pos = pcg32_boundedrand(ca_space_sz);
-									int lh = ipow(2, pcg32_boundedrand(3) + 6);
-									printf("rdm  %d - %d\n", pos % ca_space_sz, lh);
-									for (int i = 0; i < lh; ++i)
-										*(ca_space + (pos + i) % ca_space_sz) = pcg32_boundedrand(cr.ncs);
-								}
-							}
-						}
-						else
-							CA_RandomizeSpace(ca_space, ca_space_sz, cr.ncs, rcc, ps);
+						CA_RandomizeLinearSpace(ca_space, ca_space_sz, cr.ncs, rcc, ps);
 						res = 1;
 					}
 				}
@@ -5308,7 +5222,6 @@ CA_MAIN(void) {
 						else
 							cr.rl++;
 						cr = CA_Rule(cr);
-						CA_RandomizeSpace(ca_space, ca_space_sz, cr.ncs, ca_space_sz / ipow(2, pcg32_boundedrand(10)), 3);
 						char buf[10000] = "";
 						CA_RULE_PrintInfo(&cr, &buf, sizeof(buf));
 						SIMFW_SetFlushMsg(&sfw, &buf);
@@ -5349,72 +5262,75 @@ CA_MAIN(void) {
 				case SDLK_ESCAPE:
 					clmd = CLMD_NONE;
 					SIMFW_ConsoleCLS();
-					//SIMFW_SetFlushMsg(&sfw, "control-mode  none");
 					SIMFW_SetFlushMsg(&sfw, "");
 					break;
 				case SDLK_F4:
 					goto behind_sdl_loop;
-				case SDLK_SPACE:
-					CA_RandomizeSpace(ca_space, ca_space_sz, cr.ncs, ca_space_sz / ipow(2, pcg32_boundedrand(10)), 3);
-					res = 1;
-					break;
-				case SDLK_PERIOD:
-					for (int i = 0; i < ca_space_sz; i++)
-						ca_space[i] = 0;
-					ca_space[ca_space_sz / 2] = pcg32_boundedrand(cr.ncs);
-					res = 1;
-					break;
 				case SDLK_a:
 					res = 1;
 					break;
-				case SDLK_COMMA:
-					for (int i = 0; i < ca_space_sz; i++)
-						ca_space[i] = 0;
-					int lt = cr.ncn * 3 * (1 + lst * pcg32_boundedrand(100));
-					for (int i = 0; i < lt; i++)
-						ca_space[(ca_space_sz / 2 - lt / 2 + i) % ca_space_sz] = pcg32_boundedrand(cr.ncs);
-					res = 1;
+				case SDLK_PERIOD:
+					if (cnmd == CM_HASH) {
+						SIMFW_SetFlushMsg(&sfw, "Not supported while using hash-computation-mode!");
+					}
+					else {
+						memset(ca_space, 0, ca_space_sz * sizeof *ca_space);
+						ca_space[ca_space_sz / 2] = pcg32_boundedrand(cr.ncs - 1) + 1;
+						res = 1;
+					}
 					break;
-				case SDLK_e:
-					CA_RandomizeSpace(ca_space, ca_space_sz, cr.ncs, 0, 3);
-					int wf = 8;
-					CA_RandomizeSpace(ca_space + ca_space_sz / 2 - ca_space_sz / wf / 2, ca_space_sz / wf, cr.ncs, RAND_MAX, 3);
+				case SDLK_COMMA:
+					if (cnmd == CM_HASH) {
+						SIMFW_SetFlushMsg(&sfw, "Not supported while using hash-computation-mode!");
+					}
+					else {
+						memset(ca_space, 0, ca_space_sz * sizeof *ca_space);
+						int lt = cr.ncn * 3 * (1 + lst * pcg32_boundedrand(100));
+						for (int i = 0; i < lt; i++)
+							ca_space[(ca_space_sz / 2 - lt / 2 + i) % ca_space_sz] = pcg32_boundedrand(cr.ncs);
+						res = 1;
+					}
 					break;
 				case SDLK_t:
-					cr.rl = (((UINT64)pcg32_random_r(&pcgr)) << 32 | pcg32_random_r(&pcgr)) % cr.nrls;
-
-					cr = CA_Rule(cr);
-					CA_RandomizeSpace(ca_space, ca_space_sz, cr.ncs, ipow(2, pcg32_boundedrand(10)), 3);
-					char buf[10000] = "";
-					CA_RULE_PrintInfo(&cr, &buf, sizeof(buf));
-					SIMFW_SetFlushMsg(&sfw, &buf);
-					tm = 0;
-					res = 1;
+					if (cnmd == CM_HASH) {
+						SIMFW_SetFlushMsg(&sfw, "Not supported while using hash-computation-mode!");
+					}
+					else {
+						cr.rl = (((UINT64)pcg32_random_r(&pcgr)) << 32 | pcg32_random_r(&pcgr)) % cr.nrls;
+						cr = CA_Rule(cr);
+						CA_RandomizeLinearSpace(ca_space, ca_space_sz, cr.ncs, ipow(2, pcg32_boundedrand(10)), 3);
+						char buf[10000] = "";
+						CA_RULE_PrintInfo(&cr, &buf, sizeof(buf));
+						SIMFW_SetFlushMsg(&sfw, &buf);
+						tm = 0;
+						res = 1;
+					}
 					break;
 				case SDLK_BACKSPACE:
 					if (cnmd == CM_HASH) {
+						// remove unused nodes
 						if (ctl) {
 							hct[hc_sn].uc++;
 							int dc = 0;		// deleted-count
-							for (HCI i = HCTBS + 1; i < HCISZ; i++) {
+							for (HCI i = HCTBS + 1; i < HCISZ; i++) {			// go through all nodes, except the base-nodes
 								if (hct[i].ln && !(hct[i].uc & HCUCMK)) {
 									dc++;
-									if (hct[i].ln > HCTBS + 1)	// TODO should be possible to handle without check when uc is set to positive for lower first and base node
+									if (hct[i].ln > HCTBS + 1)					// make sure that the count of base nodes is never changed, othwise they could be recycled later on
 										hct[hct[i].ln].uc--;
-									if (hct[i].rn > HCTBS + 1) // see above
+									if (hct[i].rn > HCTBS + 1)					// see above
 										hct[hct[i].rn].uc--;
-									if (hct[i].r > HCTBS + 1)	// see above
+									if (hct[i].r > HCTBS + 1)					// see above
 										hct[hct[i].r].uc--;
 									hct[i].ln = 0;
-									int rcll = (hct[i].uc & HCLLMK) >> 24;	// recycled-node-level
+									int rcll = (hct[i].uc & HCLLMK) >> 24;		// recycled-node-level
 									hc_stats[rcll].nc--;
 									hc_stats[rcll].rcct++;
 								}
 							}
 							hct[hc_sn].uc--;
-							SIMFW_SetFlushMsg(&sfw, "checked  %d  hash-cells, deleted  %d", HCISZ, dc);
-
+							SIMFW_SetFlushMsg(&sfw, "removed unused nodes\nchecked  %d  hash-cells\ndeleted  %d", HCISZ, dc);
 						}
+						// remove all nodes
 						else {
 							// reset / clear hash-table
 							//memset(hct + HCTBS + 2, 0, (HCISZ - HCTBS - 1) * sizeof(HCN));
@@ -5442,6 +5358,10 @@ CA_MAIN(void) {
 							SIMFW_SetFlushMsg(&sfw, "cell-space cleared");
 							SIMFW_ConsoleCLS(&sfw);
 						}
+					}
+					else {
+						memset(ca_space, 0, ca_space_sz * sizeof(*ca_space));
+						res = 1;
 					}
 					break;
 				case SDLK_PLUS:
@@ -5479,7 +5399,6 @@ CA_MAIN(void) {
 						ca_space_sz = ca_space_sz + 1;
 					else
 						ca_space_sz = ca_space_sz * 2;
-
 					break;
 				case SDLK_MINUS:
 					if (sft)
@@ -5504,33 +5423,38 @@ CA_MAIN(void) {
 						ca_space_sz = ca_space_sz - 1;
 					else
 						ca_space_sz = max(1, ca_space_sz / 2);
-
 					break;
 				case SDLK_TAB:;
-					res = 1;
 					int cnt = (int)pow(2.0, pcg32_boundedrand(10));
-					double dy = pow(2.0, random01());	// density
-					if (sft) {
-						cnt = 64;
-						dy = 1.0;
+					if (cnmd == CM_HASH) {
+						int rs = HCTBS * ipow(2, min(hc_sl, keysym - SDLK_0));				// random size in nr. of cells
+						CA_RandomizeHashSpace(cnt, ctl);
 					}
-					if (ctl) {
-						cnt = 128;
-						if (sft)
-							cnt = 256;
-						dy = 1.0;
-					}
+					else {
+						res = 1;
+						double dy = pow(2.0, random01());	// density
+						if (sft) {
+							cnt = 64;
+							dy = 1.0;
+						}
+						if (ctl) {
+							cnt = 128;
+							if (sft)
+								cnt = 256;
+							dy = 1.0;
+						}
 
-					{
-						char info_str[1000] = "";
-						sprintf_s(info_str, sizeof info_str, "rdm  ct %d/%.2f%%  dy %.2f%%\n", cnt, 100.0 * cnt / ca_space_sz, 100.0 - 100.0 / RAND_MAX * dy);
-						SIMFW_SetFlushMsg(&sfw, "%s", info_str);
-						printf("%s", info_str);
-					}
+						{
+							char info_str[1000] = "";
+							sprintf_s(info_str, sizeof info_str, "rdm  ct %d/%.2f%%  dy %.2f%%\n", cnt, 100.0 * cnt / ca_space_sz, 100.0 - 100.0 / RAND_MAX * dy);
+							SIMFW_SetFlushMsg(&sfw, "%s", info_str);
+							printf("%s", info_str);
+						}
 
-					for (int i = 0, p = pcg32_boundedrand(ca_space_sz); i < cnt; ++i)
-						if (random01() < dy)
-							ca_space[(p + i) % ca_space_sz] = pcg32_boundedrand(cr.ncs);
+						for (int i = 0, p = pcg32_boundedrand(ca_space_sz); i < cnt; ++i)
+							if (random01() < dy)
+								ca_space[(p + i) % ca_space_sz] = pcg32_boundedrand(cr.ncs);
+					}
 					break;
 				case SDLK_END:
 					speed = sfw.sim_height;
