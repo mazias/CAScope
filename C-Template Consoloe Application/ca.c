@@ -1316,8 +1316,9 @@ returns index of found or added branch - if newly created this will have a uc (u
 		while (1) {
 			++sc;
 			cm &= HCIMASK;
-			cm = max(1 + HCTBS, cm);							// index can never be 0 or one of the base nodes of level 0
-			if (!ll) {											// nodes on level 0 are expected to be present and search at level 0 would produce errors
+			cm = max(1 + HCTBS, cm);							// index can never be 0 or one of the base nodes of level -1
+			if (!ll) {											// nodes on level 0 are created when initializing the hash table and we only need to return the checksum here
+// move this (checksum creation) to cnitfn_hash - so we can remove this block here
 				hc_stats[0].fc++;
 				break;
 			}
@@ -1330,7 +1331,7 @@ returns index of found or added branch - if newly created this will have a uc (u
 				}
 				else {
 					UINT32 cnll = (hct[cm].uc & HCLLMK) >> 24;	// current-node-level
-					// Unused node found at checksum-index > recycle (delete unused node)
+					// Unused node found at checksum-index > recycle (delete unused node); prefer to recycle nodes with a higher level
 					if ((!encm || cnll > enll) && (hct[cm].uc & HCUCMK) == 0) {
 						encm = cm;
 						enll = cnll;
@@ -1340,16 +1341,19 @@ returns index of found or added branch - if newly created this will have a uc (u
 			//
 			if (encm && sc > HCMXSC) {
 				cm = encm;
-				if (hct[cm].ln > HCTBS + 1);	// TODO it should be possible to do this without the check, when uc is set on 1 (pos. 0) and basic nodes
-				hct[hct[cm].ln].uc--;
-				if (hct[cm].rn > HCTBS + 1);	// see above
-				hct[hct[cm].rn].uc--;
-				if (hct[cm].r > HCTBS + 1);		// see above
-				hct[hct[cm].r].uc--;
-				hct[cm].ln = 0;
 				int rcll = (hct[cm].uc & HCLLMK) >> 24;	// recycled-node-level
-				hc_stats[rcll].nc--;
-				hc_stats[rcll].rcct++;
+// TODO clean this up: rcll check and > HCTBS + 1 checks should be able to be removed without side effects
+				if (rcll) {
+					if (hct[cm].ln > HCTBS + 1)	// TODO it should be possible to do this without the check, when uc is set on 1 (pos. 0) and basic nodes
+						hct[hct[cm].ln].uc--;
+					if (hct[cm].rn > HCTBS + 1)	// see above
+						hct[hct[cm].rn].uc--;
+					if (hct[cm].r > HCTBS + 1)		// see above
+						hct[hct[cm].r].uc--;
+					hct[cm].ln = 0;
+					hc_stats[rcll].nc--;
+					hc_stats[rcll].rcct++;
+				}
 			}
 			// Hashtable at checksum-index is empty > add new entry
 			if (!hct[cm].ln) {
@@ -1381,23 +1385,14 @@ returns index of found or added branch - if newly created this will have a uc (u
 				break;
 			}
 			++cm;
-			// hashtable size warning
-			//if (sc >= 255) {
-			//	printf("WARNING! Hash-table-size low, seek-count at %d\n", sc);
-			//}
 			// hashtable size to big > abort
-			hcfl++;
-			if (hcfl >= HCISZ << 2) {
+			if (hcfl || sc >= HCISZ >> 2) {
+				if (!hcfl)
+					printf("ERROR! Hash-table-size insufficient! ABORTING! Hash-cell-table is CORRUPT now!\n");
+				hcfl = 1;
 				cm = hc_ens[ll];		// return empty node as result
-				hc_stats[ll].fc++;
 				break;
 			}
-			//// Hashtable is full!
-			//if (sc >= HCISZ) {
-			//	printf("ERROR! hash table at level %d is full with %d cm %08X  HCISZ %d (press any key)\n", ll, sc, cm, HCISZ);
-			//	getch();
-			//	break;
-			//}
 		}
 		// Update stats.
 		hc_stats[ll].sc++;
@@ -1708,8 +1703,10 @@ int64_t CA_CNFN_HASH(int64_t pgnc, caBitArray* vba) {
 			hct[hc_sn].uc++;
 			hcfl = 0;
 			HCI hn = HC_find_or_add_branch(hc_sl, hc_sn, hc_sn, &rtnd);
-			if (hcfl >= HCISZ << 2)
-				SIMFW_SetFlushMsg(&sfw, "ERROR! Hash-table-size insufficient! ABORTING! Hash-cell-table is CORRUPT now! Nr. of long seeds: %d\n", hcfl);
+			if (hcfl) {
+// TODO reset / rebuild hash table like in cnitfn_hash!!!
+				SIMFW_SetFlushMsg(&sfw, "ERROR! Hash-table-size insufficient! ABORTING! Hash-cell-table is CORRUPT now!\n");
+			}
 			hct[hc_sn].uc--;
 			hc_sn = hn;
 		}
@@ -1743,6 +1740,10 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 
 	_aligned_free(hct);
 	hct = _aligned_malloc(HCISZ * sizeof(HCN), 256);
+	if (!hct) {
+		SIMFW_Die("malloc failed at %s (:%d)\n", "__FUNCSIG__", __LINE__);		// TODO - check if funcsig works with gcc
+		return;
+	}
 
 	// reset
 	memset(hct, 0, HCISZ * sizeof(HCN));
@@ -5311,37 +5312,44 @@ CA_MAIN(void) {
 						// remove unused nodes
 						if (ctl) {
 							hct[hc_sn].uc++;
-							int dc = 0;		// deleted-count
-							for (HCI i = HCTBS + 1; i < HCISZ; i++) {			// go through all nodes, except the base-nodes
-								if (hct[i].ln && !(hct[i].uc & HCUCMK)) {
-									dc++;
-									if (hct[i].ln > HCTBS + 1)					// make sure that the count of base nodes is never changed, othwise they could be recycled later on
+							int tdc = 0;											// total-deleted-count
+							int pc = 0;												// passes-count
+							while (1) {
+								int cdc = 0;										// current-deleted-count
+								for (HCI i = HCTBS + 1; i < HCISZ; i++) {			// go through all nodes, except the base-nodes
+									if (hct[i].ln && !(hct[i].uc & HCUCMK)) {
+										cdc++;
 										hct[hct[i].ln].uc--;
-									if (hct[i].rn > HCTBS + 1)					// see above
 										hct[hct[i].rn].uc--;
-									if (hct[i].r > HCTBS + 1)					// see above
 										hct[hct[i].r].uc--;
-									hct[i].ln = 0;
-									int rcll = (hct[i].uc & HCLLMK) >> 24;		// recycled-node-level
-									hc_stats[rcll].nc--;
-									hc_stats[rcll].rcct++;
+										hct[i].ln = 0;
+										int rcll = (hct[i].uc & HCLLMK) >> 24;		// recycled-node-level
+										hc_stats[rcll].nc--;
+										hc_stats[rcll].rcct++;
+									}
 								}
+								pc++;
+								tdc += cdc;
+								if (sft || !cdc)
+									break;
 							}
 							hct[hc_sn].uc--;
-							SIMFW_SetFlushMsg(&sfw, "removed unused nodes\nchecked  %d  hash-cells\ndeleted  %d", HCISZ, dc);
+							SIMFW_SetFlushMsg(&sfw, "removed unused nodes\nchecked  %d  hash-cells\npasses   %d\ndeleted  %d", HCISZ, pc, tdc);
 						}
 						// remove all nodes
 						else {
 							// reset / clear hash-table
 							//memset(hct + HCTBS + 2, 0, (HCISZ - HCTBS - 1) * sizeof(HCN));
+// TODO reset / rebuild hash table like in cnitfn_hash!!!
 							memset(&hcln, 0, sizeof(hcln));
 							memset(&hcls, 0, sizeof(hcls));
 							memset(&hc_stats[1], 0, (HCTMXLV - 1) * sizeof *hc_stats);
-							for (HCI i = HCTBS + 1; i < HCISZ; i++)
-								if (hct[i].ln && !((hct[i].uc & HCLLMK) >> 24))
+							for (HCI i = HCTBS + 2; i < HCISZ; i++) {
+								if (hct[i].ln && !((hct[i].uc & HCLLMK) >> 24))		// do not delete nodes on level 0
 									;
 								else
 									hct[i].ln = 0;
+							}
 							// build empty nodes
 							HCI en = HC_find_or_add_branch(0, 1, 1, NULL);
 							for (int i = 1; i <= 126; i++) {
@@ -5646,13 +5654,11 @@ CA_MAIN(void) {
 			}
 			else
 				ds = (double)speed;
-			printf("cnmd %s  sz %.2e  sd %.2e  cs %.2e  sc %.2e / %5.1f%%  tm %.2e\n",
+			printf("cnmd %s  sz %.2e  sd %.2e  cs %.2e  tm %.2e\n",
 				ca_cnsgs[cnmd].name,
 				(double)ca_space_sz,
 				ds,
-				ds* ca_space_sz / sfw.avg_duration, //ds* ca_space_sz / sfw.avg_duration / 8.0 / 1024.0 / 1024.0 / 1024.0,
-				(double)hcfl,
-				100.0 / (double)HCISZ * (double)hcfl,
+				ds * ca_space_sz / sfw.avg_duration, //ds* ca_space_sz / sfw.avg_duration / 8.0 / 1024.0 / 1024.0 / 1024.0,
 				(double)tm* ca_space_sz);
 			printf("%80s\n", "");
 			printf("%80s\n", "");
