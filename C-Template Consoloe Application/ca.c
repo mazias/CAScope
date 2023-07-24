@@ -1666,9 +1666,17 @@ void HC_init(CA_RULE* cr) {
 	memset(&hc_stats, 0, sizeof(hc_stats));
 
 	// init base node
-	for (int i = 1; i <= HCTBS; i++) {
-		hct[i].uc = 1;
-	}
+	/*
+	the 4 base nodes - i.e. size of two cells and no result cell are never actually used, because 
+	we never need to look them up (since level 0 node of size 4 encode them literally (their left, right 
+	and result nodes are no ids into the hash table but the actual bits of the cells (1 is added to never
+	have a zero value - as zero on left node indicates empty node)
+	Still we can not use these hash table slots, since then it is possible (probability is low, but
+	it will happen with enough repetitions) that a higher level node has two child nodes whith both ids 
+	in range of base nodes - the higher level node would then have the same checksum and left and right 
+	nodes as the level 1 node and this will corrupt the hash table (we could additionaly check level
+	when comparing nodes, but this is not worth the efoort to only save 4 slots of the hash table)
+	*/
 
 	// Precalculate all states of a space of 4 cells after 2 time steps.
 	// Ruleset: 2 states, 3 cells in a neighborhod
@@ -3787,7 +3795,7 @@ lifeanddrawnewcleanzoom(
 			(ca_cnsgs[cnmd].itfn)(&vba, cr);
 
 			/* Test cell-space conversion */
-			if (ds.tm == 2) {
+			if (ds. tm == 2) {
 				if (ca_cnsgs[cnmd].scfn != NULL) {
 					printf("Testing cell-space-conversion\n");
 					printf("\tCA_SCFN  %s\n", ca_cnsgs[cnmd].name);
@@ -5232,10 +5240,12 @@ CA_MAIN(void) {
 							hct[hc_sn].uc--;
 							SIMFW_SetFlushMsg(&sfw, "removed unused nodes\nchecked  %d  hash-cells\npasses   %d\ndeleted  %d", HCISZ, pc, tdc);
 						}
-						// remove all nodes
-						else {
+						else if (sft) {
 							// reset / clear hash-table
-							//HC_init(&cr);
+							HC_init(&cr);
+						}
+						// remove all nodes - manual delete to check validity of hash table
+						else {
 							// manual delete to check validity of hash table
 							for (HCI i = HCTBS + 1; i < HCISZ; i++) {
 								int ll = (hct[i].uc & HCLLMK) >> 24;
@@ -5350,13 +5360,40 @@ CA_MAIN(void) {
 					}
 					break;
 				case SDLK_END:
-					speed = sfw.sim_height;
+					if (cnmd == CM_HASH)
+						sdmrpt = 2;
+					else
+						speed = sfw.sim_height;
 					break;
 				case SDLK_HOME:
-					speed = 4;
+					if (cnmd == CM_HASH)
+						sdmrpt = 1;
+					else
+						speed = 4;
 					break;
 				case SDLK_DELETE:
-					speed = x_shift = 0;
+					if (cnmd == CM_HASH) {
+						static int ltsdmrpt = 0;			// last sdmrpt
+						if (sdmrpt) {
+							ltsdmrpt = sdmrpt;
+							sdmrpt = 0;
+						}
+						else
+							sdmrpt = ltsdmrpt;
+					}
+					else {
+						static int64_t last_manual_speed = 0;
+						const int64_t ds = (int64_t)0;
+						if (speed != ds) {
+							last_manual_speed = speed;
+							speed = ds;
+						}
+						else {
+							speed = last_manual_speed;
+						}
+
+						x_shift = 0;
+					}
 					break;
 				case SDLK_d:
 				{
