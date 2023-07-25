@@ -1130,7 +1130,7 @@ typedef UINT32 HCI;							// hash-cell-index-type
 #define HCITPBYC 4							// hash-cell-index-type-byte-count
 UINT32 HCISZPT = 20;						// hash-cell-index-size as power of two, i.e. 8 = index size of 256;
 UINT32 HCMXSC = 8;							// hash-cell-maximum-seek-count
-#define HCTMXLV	128							// hash-cell-table-max-level
+#define HCTMXLV	64							// hash-cell-table-max-level
 
 #define HCTBSPT	2							// hash-cell-table-base-size as power of two -- MUST BE 2 ATM
 #define HCTBS (1<<HCTBSPT)					// hash-cell-table-base-size / size of lowest/smallest level
@@ -1180,14 +1180,15 @@ void HC_print_stats() {
 	// display stats
 	memset(&hc_stats[HCTMXLV - 1], 0, sizeof(hc_stats[HCTMXLV - 1]));	// reset sums
 	printf("-\n");
-	printf(" ll  %8s %4s  %8s %7s  %8s  %8s  %8s %4s  %8s  ll\n",
-		"nc", "%", "sc", "fc%", "rqct", "adct", "seeks", "avgsk", "size");
+	printf("ll  %9s %5s  %9s %7s  %9s  %9s  %9s %6s  %8s  ll\n",
+		         "nc", "%", "sc", "fc%", "rqct", "adct", "seeks", "avgsk", "size");
 	static HC_STATS sl = { 0 };		// stats-last
-	HC_STATS sd = { 0 }; // stats-delta
+	HC_STATS sd = { 0 };			// stats-delta
 	for (int i = 0; i < HCTMXLV; ++i) {
 		if (i && hc_stats[i].nc <= 1 && !hc_stats[i].sc && i < HCTMXLV - 2)
 			continue;
 		if (i < HCTMXLV - 2) {
+			// sum
 			hc_stats[HCTMXLV - 1].nc += hc_stats[i].nc;
 			hc_stats[HCTMXLV - 1].sc += hc_stats[i].sc;
 			hc_stats[HCTMXLV - 1].fc += hc_stats[i].fc;
@@ -1196,11 +1197,12 @@ void HC_print_stats() {
 			hc_stats[HCTMXLV - 1].ss += hc_stats[i].ss;
 		}
 		else if (i == HCTMXLV - 2) {
-			sd.rcct = hc_stats[HCTMXLV - 1].rcct - sl.rcct;
-			sd.adct = hc_stats[HCTMXLV - 1].adct - sl.adct;
+			// delta
 			sd.nc = hc_stats[HCTMXLV - 1].nc - sl.nc;
 			sd.sc = hc_stats[HCTMXLV - 1].sc - sl.sc;
 			sd.fc = hc_stats[HCTMXLV - 1].fc - sl.fc;
+			sd.rcct = hc_stats[HCTMXLV - 1].rcct - sl.rcct;
+			sd.adct = hc_stats[HCTMXLV - 1].adct - sl.adct;
 			sd.ss = hc_stats[HCTMXLV - 1].ss - sl.ss;
 			hc_stats[HCTMXLV - 2] = sd;
 			sl = hc_stats[HCTMXLV - 1];
@@ -1209,7 +1211,7 @@ void HC_print_stats() {
 		else
 			printf("=== SUM%93s\n", "");
 
-		printf("%3d  %8.2e %3.0f%%  %8.2e %6.2f%%  %8.2e  %8.2e  %8.2e %5.2f  %8.2e  %2d\n",
+		printf("%2d  % 8.2e % 4.0f%%  % 8.2e % 6.1f%%  % 8.2e  % 8.2e  % 8.2e % 6.2f  %8.2e  %2d\n",
 			i,
 			(double)hc_stats[i].nc,
 			(100.0 / (double)HCISZ * (double)hc_stats[i].nc),
@@ -1438,7 +1440,7 @@ HCI HC_add_node(int ll, HCI n, int* mxll) {
 	if (hcls[ll] == 0) {
 		// Branch is empty > add first node and wait for the seconde one
 		hcln[ll] = n;
-		if (ll)
+///		if (ll)
 			hct[n].uc++;
 		hcls[ll] = 1;
 		return n;
@@ -1447,7 +1449,7 @@ HCI HC_add_node(int ll, HCI n, int* mxll) {
 		*mxll = ll;
 		HCI ln = hcln[ll];							// left-node
 		HCI rn = n;									// right-node
-		if (ll)
+///		if (ll)
 			hct[n].uc++;
 		HCI nn;										// new-node
 		static HCI tn = 0;
@@ -1656,6 +1658,15 @@ void HC_init_empty_nodes() {
 		hct[en].uc--;
 		en = tn;
 	}
+
+	// clear stats - otherwise stats are full to all levels until´speed is higher zero
+	for (int i = 0; i < HCTMXLV - 2; i++) {
+		hc_stats[i].fc = 0;
+		hc_stats[i].rcct = 0;
+		hc_stats[i].adct = 0;
+		hc_stats[i].sc = 0;
+		hc_stats[i].ss = 0;
+	}
 }
 
 void HC_init(CA_RULE* cr) {
@@ -1730,16 +1741,16 @@ void HC_init(CA_RULE* cr) {
 }
 
 int64_t CA_CNFN_HASH(int64_t pgnc, caBitArray* vba) {
-	for (int i = 0; i < HCTMXLV - 2; i++) {
-		hc_stats[i].fc = 0;
-		hc_stats[i].rcct = 0;
-		hc_stats[i].adct = 0;
-		hc_stats[i].sc = 0;
-		hc_stats[i].ss = 0;
-	}
-
 	HCI rtnd = NULL;		// result node
 	if (sdmrpt) {
+		for (int i = 0; i < HCTMXLV - 2; i++) {
+			hc_stats[i].fc = 0;
+			hc_stats[i].rcct = 0;
+			hc_stats[i].adct = 0;
+			hc_stats[i].sc = 0;
+			hc_stats[i].ss = 0;
+		}
+
 		// Scale up space/size to allow calculate needed time
 		int org_hc_sl = hc_sl;
 		hcfl = 0;
@@ -3795,7 +3806,7 @@ lifeanddrawnewcleanzoom(
 			(ca_cnsgs[cnmd].itfn)(&vba, cr);
 
 			/* Test cell-space conversion */
-			if (ds. tm == 2) {
+			if (ds.tm == 2) {
 				if (ca_cnsgs[cnmd].scfn != NULL) {
 					printf("Testing cell-space-conversion\n");
 					printf("\tCA_SCFN  %s\n", ca_cnsgs[cnmd].name);
@@ -5557,13 +5568,6 @@ CA_MAIN(void) {
 				fccls = 0;
 				SIMFW_ConsoleSetCursorPosition(0, 0);
 				HC_print_stats();
-				for (int i = 0; i < HCTMXLV - 2; i++) {
-					hc_stats[i].fc = 0;
-					hc_stats[i].rcct = 0;
-					hc_stats[i].adct = 0;
-					hc_stats[i].sc = 0;
-					hc_stats[i].ss = 0;
-				}
 			}
 			else
 				fccls = 1;
