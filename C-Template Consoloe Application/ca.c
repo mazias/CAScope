@@ -4409,6 +4409,7 @@ CA_RandomizeHashSpace(int rs, int zero_position)
 	int hcbtln[HCTMXLV] = { 0 };				// hash-node-backtrack-left-node-taken array
 	int bti = 0;								// backtrack-index
 	HCI cn = hc_sn;								// current node
+	hct[hc_sn].uc++;
 	int cl = hc_sl;								// current level
 	while (cl > ml) {
 		// remember path taken
@@ -4438,7 +4439,7 @@ CA_RandomizeHashSpace(int rs, int zero_position)
 	}
 	// hct[hc_sn].uc--;
 	hc_sn = cn;
-	// hct[hc_sn].uc++;
+	hct[hc_sn].uc++;
 }
 
 void
