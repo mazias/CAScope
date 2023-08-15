@@ -1184,8 +1184,6 @@ void HC_print_stats() {
 	static HC_STATS sl = { 0 };		// stats-last
 	HC_STATS sd = { 0 };			// stats-delta
 	for (int i = 0; i < HCTMXLV; ++i) {
-		if (i && hc_stats[i].nc <= 1 && !hc_stats[i].sc && i < HCTMXLV - 2)
-			continue;
 		if (i < HCTMXLV - 2) {
 			// sum
 			hc_stats[HCTMXLV - 1].nc += hc_stats[i].nc;
@@ -1210,6 +1208,8 @@ void HC_print_stats() {
 		else
 			printf("=== SUM%93s\n", "");
 
+		if (i && hc_stats[i].nc <= 3 && !hc_stats[i].sc && i < HCTMXLV - 2)
+			continue;
 		printf("%2d  % 8.2e % 4.0f%%  % 8.2e % 6.1f%%  % 8.2e  % 8.2e  % 8.2e % 6.2f  %8.2e  %2d\n",
 			i,
 			(double)hc_stats[i].nc,
@@ -1330,14 +1330,14 @@ returns index of found or added branch - if newly created this will have a uc (u
 			// recycle / delete
 			if (encm && sc > HCMXSC) {
 				cm = encm;
-				int rcll = (hct[cm].uc & HCLLMK) >> 24;			// recycled-node-level
-				hct[hct[cm].ln].uc--;
-				hct[hct[cm].rn].uc--;
-				hct[hct[cm].r].uc--;
-				hct[cm].ln = 0;
-				hc_stats[rcll].nc--;
-				hc_stats[rcll].rcct++;
-			}
+					int rcll = (hct[cm].uc & HCLLMK) >> 24;			// recycled-node-level
+					hct[hct[cm].ln].uc--;
+					hct[hct[cm].rn].uc--;
+					hct[hct[cm].r].uc--;
+					hct[cm].ln = 0;
+					hc_stats[rcll].nc--;
+					hc_stats[rcll].rcct++;
+				}
 			// Hashtable at checksum-index is empty > add new entry
 			if (!hct[cm].ln) {
 				hc_stats[ll].nc++;
@@ -1482,6 +1482,32 @@ HCI convert_bit_array_to_hash_array(caBitArray* vba, int* ll) {
 
 	*ll = ml;
 	return ltnd;
+}
+
+/*
+* 
+sc_hct		source hash-table
+sl			source-level
+sn			source-node(-id)
+return		node-id of copied node in current hash-table (=hct)
+*/
+HCI HC_copy(HCN* sc_hct, int sl, HCI sn) {
+	HCI ln, rn, rt;
+	if (!sl) {
+		ln = sc_hct[sn].ln;
+		rn = sc_hct[sn].rn;
+	}
+	else {
+		ln = HC_copy(sc_hct, sl - 1, sc_hct[sn].ln);
+		rn = HC_copy(sc_hct, sl - 1, sc_hct[sn].rn);
+	}
+	//printf("ll %d  ln %6x  rn %6x\n", sl, ln, rn);
+	rt = HC_find_or_add_branch(sl, ln, rn, NULL);
+	if (sl) {
+		hct[ln].uc--;
+		hct[rn].uc--;
+	}
+	return rt;
 }
 
 /*
@@ -1635,43 +1661,19 @@ display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, int pll, HCI n, UINT32
 	return pbf;
 }
 
-void HC_init_empty_nodes() {
-	// init empty nodes
-	HCI en = 1;
-	// note: uc of base node 0 will be 5 after this: on level 0 it already exists and uc will be +1 = 2, on level 1 3 more references 
-	// are added for left, right and result node
-	for (int i = 0; i < HCTMXLV; i++)
-		hc_ens[i] = en = HC_find_or_add_branch(i, en, en, NULL);
-
-	// clear stats - otherwise stats are full to all levels until´speed is higher zero
-	for (int i = 0; i < HCTMXLV - 2; i++) {
-		hc_stats[i].fc = 0;
-		hc_stats[i].rcct = 0;
-		hc_stats[i].adct = 0;
-		hc_stats[i].sc = 0;
-		hc_stats[i].ss = 0;
-	}
-}
-
-void HC_init(CA_RULE* cr) {
-	// reset
-	memset(hct, 0, HCISZ * sizeof(HCN));
-	memset(&hcln, 0, sizeof(hcln));
-	memset(&hc_stats, 0, sizeof(hc_stats));
-
-	// init base node
-	/*
-	the 4 base nodes - i.e. size of two cells and no result cell are never actually used, because 
-	we never need to look them up (since level 0 node of size 4 encode them literally (their left, right 
-	and result nodes are no ids into the hash table but the actual bits of the cells (1 is added to never
-	have a zero value - as zero on left node indicates empty node)
-	Still we can not use these hash table slots, since then it is possible (probability is low, but
-	it will happen with enough repetitions) that a higher level node has two child nodes whith both ids 
-	in range of base nodes - the higher level node would then have the same checksum and left and right 
-	nodes as the level 1 node and this will corrupt the hash table (we could additionaly check level
-	when comparing nodes, but this is not worth the efoort to only save 4 slots of the hash table)
-	*/
-
+// init base node
+/*
+the 4 base nodes - i.e. size of two cells and no result cell are never actually used, because
+we never need to look them up (since level 0 node of size 4 encode them literally (their left, right
+and result nodes are no ids into the hash table but the actual bits of the cells (1 is added to never
+have a zero value - as zero on left node indicates empty node)
+Still we can not use these hash table slots, since then it is possible (probability is low, but
+it will happen with enough repetitions) that a higher level node has two child nodes whith both ids
+in range of base nodes - the higher level node would then have the same checksum and left and right
+nodes as the level 1 node and this will corrupt the hash table (we could additionaly check level
+when comparing nodes, but this is not worth the efoort to only save 4 slots of the hash table)
+*/
+void HC_init_base_nodes(CA_RULE cr) {
 	// Precalculate all states of a space of 4 cells after 2 time steps.
 	// Ruleset: 2 states, 3 cells in a neighborhod
 	// After 2 time steps 2 cells the result is two cells wide
@@ -1683,11 +1685,11 @@ void HC_init(CA_RULE* cr) {
 			for (int p = 0; p < 2; ++p) {
 				// get result bit
 				int sr =
-					cr->mntl[0] * (1 & (cs >> (p + 0))) +
-					cr->mntl[1] * (1 & (cs >> (p + 1))) +
-					cr->mntl[2] * (1 & (cs >> (p + 2)));
+					cr.mntl[0] * (1 & (cs >> (p + 0))) +
+					cr.mntl[1] * (1 & (cs >> (p + 1))) +
+					cr.mntl[2] * (1 & (cs >> (p + 2)));
 				// set result bit in cs
-				if (cr->rltl[sr] == 0)
+				if (cr.rltl[sr] == 0)
 					cs &= ((UINT8)~((UINT8)1 << p));
 				else
 					cs |= (UINT8)1 << p;
@@ -1719,20 +1721,46 @@ void HC_init(CA_RULE* cr) {
 			++i;
 		}
 	}
+}
 
+void HC_init_empty_nodes() {
+	// init empty nodes
+	HCI en = 1;
+	// note: uc of base node 0 will be 5 after this: on level 0 it already exists and uc will be +1 = 2, on level 1 3 more references 
+	// are added for left, right and result node
+	for (int i = 0; i < HCTMXLV; i++)
+		hc_ens[i] = en = HC_find_or_add_branch(i, en, en, NULL);
+
+	// clear stats - otherwise stats are full to all levels until´speed is higher zero
+	for (int i = 0; i < HCTMXLV - 2; i++) {
+		hc_stats[i].fc = 0;
+		hc_stats[i].rcct = 0;
+		hc_stats[i].adct = 0;
+		hc_stats[i].sc = 0;
+		hc_stats[i].ss = 0;
+	}
+}
+
+void HC_init(CA_RULE* cr) {
+	// reset
+	memset(hct, 0, HCISZ * sizeof(HCN));
+	memset(&hcln, 0, sizeof(hcln));
+	memset(&hc_stats, 0, sizeof(hc_stats));
+
+	HC_init_base_nodes(*cr);
 	HC_init_empty_nodes();
 }
 
 int64_t CA_CNFN_HASH(int64_t pgnc, caBitArray* vba) {
 	HCI rtnd = NULL;		// result node
 	if (sdmrpt) {
-		for (int i = 0; i < HCTMXLV - 2; i++) {
-			hc_stats[i].fc = 0;
-			hc_stats[i].rcct = 0;
-			hc_stats[i].adct = 0;
-			hc_stats[i].sc = 0;
-			hc_stats[i].ss = 0;
-		}
+		//for (int i = 0; i < HCTMXLV - 2; i++) {
+		//	hc_stats[i].fc = 0;
+		//	hc_stats[i].rcct = 0;
+		//	hc_stats[i].adct = 0;
+		//	hc_stats[i].sc = 0;
+		//	hc_stats[i].ss = 0;
+		//}
 
 		// Scale up space/size to allow calculate needed time
 		int org_hc_sl = hc_sl;
@@ -3616,7 +3644,7 @@ lifeanddrawnewcleanzoom(
 	*/
 	CA_RULE* cr,										// ca-rule configuration
 	CA_CT* sc,											// space
-	uint64_t scsz,											// space-size
+	uint64_t scsz,										// space-size
 	int64_t tm,											// time - nr of generations to evolve
 	int res,											// ca-space-reset-flag
 	int dyrt,											// display-reset-flag
@@ -3629,8 +3657,8 @@ lifeanddrawnewcleanzoom(
 )
 {
 	/* Abort if time is zero */
-	if (tm <= 0)
-		return;
+	//if (tm <= 0)
+	//	return;
 
 	/* Check for maximum size of rule tables */
 	if (cr->nns > LV_MAXRLTLSZ) {
@@ -4593,7 +4621,7 @@ CA_MAIN(void) {
 		nkb.name = "hash-cell-count-(computation-mode)";
 		nkb.description = "hash-cell-index-size as power of two";
 		nkb.val = &HCISZPT;
-		nkb.cgfg = &res;
+		//nkb.cgfg = &res;
 		nkb.slct_key = SDLK_F6;
 		nkb.min = 10; nkb.max = 30;
 		SIMFW_AddKeyBindings(&sfw, nkb);
@@ -4907,6 +4935,7 @@ CA_MAIN(void) {
 		int fscd = 0;									// focus (hlfs, vlfs, vlzm, hlzm) has been changed
 		int64_t org_speed = speed;
 		uint64_t last_ca_space_sz = ca_space_sz;
+		UINT32 HCISZPTLV = HCISZPT;						// HCISZPT last value - must be initialized to be same value as HCISZPT
 		while (SDL_PollEvent(&e)) {
 			const UINT8* kbst = SDL_GetKeyboardState(NULL); /* keyboard state */
 			SDL_Keymod kbms = SDL_GetModState(); /* keyboard mod state */
@@ -5493,6 +5522,23 @@ CA_MAIN(void) {
 				if (fscd)
 					dyrt = 1;
 
+				// hash-cell-size has been changed
+				if (HCISZPTLV != HCISZPT) {					
+					HCN* hct_old;
+					hct_old = hct;
+					hct = _aligned_malloc(HCISZ * sizeof(HCN), 256);
+					if (!hct) {
+						SIMFW_Die("malloc failed at %s (:%d)\n", "__FUNCSIG__", __LINE__);		// TODO - check if funcsig works with gcc
+						return;
+					}
+
+					//SIMFW_SetFlushMsg(&sfw, "copied  %d bytes\n", ((UINT32)1 << HCISZPTLV) * sizeof(HCN));
+
+					HC_init(&cr);
+					hc_sn = HC_copy(hct_old, hc_sl, hc_sn);
+					_aligned_free(hct_old);
+				}
+
 				/* CA-space-size has been changed */
 				if (ca_space_sz != last_ca_space_sz && cnmd != CM_HASH) {
 					printf("ca-space-resize  new %d  old %d\n", ca_space_sz, last_ca_space_sz);
@@ -5574,6 +5620,14 @@ CA_MAIN(void) {
 				fccls = 0;
 				SIMFW_ConsoleSetCursorPosition(0, 0);
 				HC_print_stats();
+				if (sdmrpt)
+					for (int i = 0; i < HCTMXLV - 2; i++) {
+						hc_stats[i].fc = 0;
+						hc_stats[i].rcct = 0;
+						hc_stats[i].adct = 0;
+						hc_stats[i].sc = 0;
+						hc_stats[i].ss = 0;
+					}
 			}
 			else
 				fccls = 1;
