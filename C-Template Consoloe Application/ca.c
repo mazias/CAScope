@@ -193,60 +193,68 @@ int32_t log2fix(uint32_t x, size_t precision)
 /*
  * 32 bit magic FNV-0 and FNV-1 prime
  */
-#define FNV_32_PRIME ((Fnv32_t)0x01000193)
-#define FNV1_32_INIT ((UINT32)2166136261)
+#define FNV_32_PRIME ((UINT32)0x01000193)
+#define FNV1_32_INIT ((UINT32)0x811c9dc5)
+#define FNV1_32A_INIT FNV1_32_INIT
 
- /*
-  * fnv_32_buf - perform a 32 bit Fowler/Noll/Vo hash on a buffer
-  *
-  * input:
-  *	buf	- start of buffer to hash
-  *	len	- length of buffer in octets
-  *	hval	- previous hash value or 0 if first call
-  *
-  * returns:
-  *	32 bit hash as a static hash type
-  *
-  * NOTE: To use the 32 bit FNV-0 historic hash, use FNV0_32_INIT as the hval
-  *	 argument on the first call to either fnv_32_buf() or fnv_32_str().
-  *
-  * NOTE: To use the recommended 32 bit FNV-1 hash, use FNV1_32_INIT as the hval
-  *	 argument on the first call to either fnv_32_buf() or fnv_32_str().
-  */
+/*
+ * fnv_32a_buf - perform a 32 bit Fowler/Noll/Vo FNV-1a hash on a buffer
+ *
+ * input:
+ *	buf	- start of buffer to hash
+ *	len	- length of buffer in octets
+ *	hval	- previous hash value or 0 if first call
+ *
+ * returns:
+ *	32 bit hash as a static hash type
+ *
+ * NOTE: To use the recommended 32 bit FNV-1a hash, use FNV1_32A_INIT as the
+ * 	 hval arg on the first call to either fnv_32a_buf() or fnv_32a_str().
+ */
 UINT32
-fnv_32_buf(void* buf, size_t len, UINT32 hval)
+fnv_32a_buf(void* buf, size_t len, UINT32 hval)
 {
 	unsigned char* bp = (unsigned char*)buf;	/* start of buffer */
 	unsigned char* be = bp + len;		/* beyond end of buffer */
 
 	/*
-	 * FNV-1 hash each octet in the buffer
+	 * FNV-1a hash each octet in the buffer
 	 */
 	while (bp < be) {
 
-		/* multiply by the 32 bit FNV magic prime mod 2^32 */
-#if defined(NO_FNV_GCC_OPTIMIZATION)
-		hval *= FNV_32_PRIME;
-#else
-		hval += (hval << 1) + (hval << 4) + (hval << 7) + (hval << 8) + (hval << 24);
-#endif
-
 		/* xor the bottom with the current octet */
 		hval ^= (UINT32)*bp++;
+
+		/* multiply by the 32 bit FNV magic prime mod 2^32 */
+//#if defined(NO_FNV_GCC_OPTIMIZATION)
+		hval *= FNV_32_PRIME;
+//#else
+//		hval += (hval << 1) + (hval << 4) + (hval << 7) + (hval << 8) + (hval << 24);
+//#endif
 	}
 
 	/* return our new hash value */
 	return hval;
 }
 
-UINT16
-fnv_16_buf(void* buf, size_t len)
+// fnv checksum for 4 byte buffer
+UINT32
+fnv_32a_buf_4bt(UINT32 buf, UINT32 hval)
 {
-#define MASK_16 (((UINT32)1<<16)-1) /* i.e., (u_int32_t)0xffff */
-	UINT32 hash;
-	hash = fnv_32_buf(buf, len, FNV1_32_INIT);
-	hash = (hash >> 16) ^ (hash & MASK_16);
-	return (UINT16)hash;
+	unsigned char* bp = (unsigned char*)&buf;	/* start of buffer */
+	/*
+	 * FNV-1a hash each octet in the buffer
+	 */
+	for (int c = 0; c < 4; c++) {
+		/* xor the bottom with the current octet */
+		hval ^= (UINT32)*bp++;
+		/* multiply by the 32 bit FNV magic prime mod 2^32 */
+		//hval *= FNV_32_PRIME;
+		hval += (hval << 1) + (hval << 4) + (hval << 7) + (hval << 8) + (hval << 24);
+	}
+
+	/* return our new hash value */
+	return hval;
 }
 
 // returns 0-terminated string of content of filename
@@ -1296,8 +1304,28 @@ returns index of found or added branch - if newly created this will have a uc (u
 		// Generate checksum.
 		HCI cm;													// checksum
 		UINT32 cm32;
-		cm32 = fnv_32_buf(&ln, HCITPBYC, FNV1_32_INIT);
-		cm32 = fnv_32_buf(&rn, HCITPBYC, cm32);
+		//cm32 = fnv_32a_buf(&ln, HCITPBYC, FNV1_32_INIT);
+		//cm32 = fnv_32a_buf(&rn, HCITPBYC, cm32);
+
+		// note on optimization: speed of hash generation will not matter that much anyway compared to mem access; functon call to fnv will probably be inlined automatically
+		cm32 = fnv_32a_buf_4bt(ln, FNV1_32_INIT);
+		cm32 = fnv_32a_buf_4bt(rn, cm32);
+		// TODO
+		// xor-fold may also be not necessary since the numbers of bits needed in the hash are always a power of two (not 100% sure atm if this is realy the case)
+		//UINT32 cm32i;
+		//cm32i = FNV1_32_INIT;
+		//cm32i ^= ((unsigned char*)(&ln))[0]; cm32i *= FNV_32_PRIME;
+		//cm32i ^= ((unsigned char*)(&ln))[1]; cm32i *= FNV_32_PRIME;
+		//cm32i ^= ((unsigned char*)(&ln))[2]; cm32i *= FNV_32_PRIME;
+		//cm32i ^= ((unsigned char*)(&ln))[3]; cm32i *= FNV_32_PRIME;
+		//cm32i ^= ((unsigned char*)(&rn))[0]; cm32i *= FNV_32_PRIME;
+		//cm32i ^= ((unsigned char*)(&rn))[1]; cm32i *= FNV_32_PRIME;
+		//cm32i ^= ((unsigned char*)(&rn))[2]; cm32i *= FNV_32_PRIME;
+		//cm32i ^= ((unsigned char*)(&rn))[3]; cm32i *= FNV_32_PRIME;
+		//if (cm32 != cm32i) {
+		//	SIMFW_Die("fnv inline checksum failed!");
+		//}
+
 		cm = ((cm32 >> HCISZPT) ^ cm32);						// Xor-fold 32bit checksum to fit size of hash-table (needed mask is applied in while-loop).
 
 		// Search for checksum.
@@ -1556,7 +1584,7 @@ UINT32* old_display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, 
 		if (ll >= ds.hddh + ds.hdll) {
 			//v *= max(1, (hct[n].uc & HCUCMK));
 			v += (hct[n].uc & HCUCMK);
-			//v = fnv_32_buf(&n, 4, v);
+			//v = fnv_32a_buf(&n, 4, v);
 		}
 	}
 	else {
@@ -1567,8 +1595,8 @@ UINT32* old_display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, 
 	}
 
 	if (ll <= ds.hdll) {
-		///v = fnv_32_buf(&n, 4, v);
-		///v = fnv_32_buf(&n, 4, FNV1_32_INIT);
+		///v = fnv_32a_buf(&n, 4, v);
+		///v = fnv_32a_buf(&n, 4, FNV1_32_INIT);
 		if (v > *mxv || *mxv == 0)
 			*mxv = v;
 		if (v < *mnv || *mnv == 0)
@@ -1703,8 +1731,8 @@ void HC_init_base_nodes(CA_RULE cr) {
 			// Generate checksum. (compare HC_find_or_add_branch)
 			HCI cm;										// checksum
 			UINT32 cm32;
-			cm32 = fnv_32_buf(&ln, HCITPBYC, FNV1_32_INIT);
-			cm32 = fnv_32_buf(&rn, HCITPBYC, cm32);
+			cm32 = fnv_32a_buf(&ln, HCITPBYC, FNV1_32_INIT);
+			cm32 = fnv_32a_buf(&rn, HCITPBYC, cm32);
 			cm = ((cm32 >> HCISZPT) ^ cm32);
 			cm &= HCIMASK;
 

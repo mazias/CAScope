@@ -71,7 +71,6 @@ extern int hc_sl;
 extern HCI hc_sn;
 extern HCI hc_ens[128];
 extern HCN *hct;
-extern int hcls[HCTMXLV];
 extern HCI hcln[HCTMXLV];
 extern UINT32 HCMXSC;
 extern UINT32 HCISZPT;
