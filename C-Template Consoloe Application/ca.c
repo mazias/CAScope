@@ -1779,6 +1779,8 @@ void HC_init(CA_RULE* cr) {
 	HC_init_empty_nodes();
 }
 
+
+// NOTE this functions ignores the usual gnc counters for numbers of generations and uses hash-specific counter sdmrpt instead
 int64_t CA_CNFN_HASH(int64_t pgnc, caBitArray* vba) {
 	HCI rtnd = NULL;		// result node
 	if (sdmrpt) {
@@ -1842,7 +1844,7 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 	_aligned_free(hct);
 	hct = _aligned_malloc(HCISZ * sizeof(HCN), 256);
 	if (!hct) {
-		SIMFW_Die("malloc failed at %s (:%d)\n", "__FUNCSIG__", __LINE__);		// TODO - check if funcsig works with gcc
+		SIMFW_Die("malloc failed at %s (:%d)\n", __FUNCSIG__, __LINE__);
 		return;
 	}
 
@@ -4499,7 +4501,7 @@ CA_RandomizeLinearSpace(
 	CA_CT* pa;							// pattern array
 	pa = malloc(ps * sizeof(*pa));		// allocate memory for pattern array
 	if (pa == NULL) {
-		SIMFW_Die("malloc failed at %s (:%d)\n", "__FUNCSIG__", __LINE__);		// TODO - check if funcsig works with gcc
+		SIMFW_Die("malloc failed at %s (:%d)\n", __FUNCSIG__, __LINE__);
 		return;
 	}
 	for (int i = 0; i < ps; ++i)		// create random pattern
@@ -4585,7 +4587,7 @@ CA_MAIN(void) {
 	ds.hdll = 0;
 	ds.mlsc = 0;
 
-	uint64_t tm = 0;			/* time */
+	double tm = 0.0;			/* time - in relation to space-size, so 1.0 = space-size or one complete line */
 
 	int64_t speed = rel_start_speed, x_shift = 0;
 
@@ -5023,7 +5025,6 @@ CA_MAIN(void) {
 			}
 			else if (e.type == SDL_KEYDOWN) {
 				int keysym = e.key.keysym.sym;
-				int szcd = 0;									// size changed
 				/* Screen-Control-Mode */
 				if (clmd == CLMD_SCREEN) {
 					int cd = 1;		// keysim consumed
@@ -5265,7 +5266,7 @@ CA_MAIN(void) {
 						char buf[10000] = "";
 						CA_RULE_PrintInfo(&cr, &buf, sizeof(buf));
 						SIMFW_SetFlushMsg(&sfw, &buf);
-						tm = 0;
+						tm = 0.0;
 						res = 1;
 					}
 					break;
@@ -5273,6 +5274,7 @@ CA_MAIN(void) {
 					if (cnmd == CM_HASH) {
 						if (sft) {
 							// reset / clear hash-table
+							tm = 0.0;
 							HC_init(&cr);
 							hc_sn = hc_ens[hc_sl];
 							hct[hc_sn].uc++;
@@ -5336,6 +5338,7 @@ CA_MAIN(void) {
 						}
 					}
 					else {
+						tm = 0.0;
 						memset(ca_space, 0, ca_space_sz * sizeof(*ca_space));
 						res = 1;
 					}
@@ -5556,11 +5559,9 @@ CA_MAIN(void) {
 					hct_old = hct;
 					hct = _aligned_malloc(HCISZ * sizeof(HCN), 256);
 					if (!hct) {
-						SIMFW_Die("malloc failed at %s (:%d)\n", "__FUNCSIG__", __LINE__);		// TODO - check if funcsig works with gcc
+						SIMFW_Die("malloc failed at %s (:%d)\n", __FUNCSIG__, __LINE__);
 						return;
 					}
-
-					//SIMFW_SetFlushMsg(&sfw, "copied  %d bytes\n", ((UINT32)1 << HCISZPTLV) * sizeof(HCN));
 
 					HC_init(&cr);
 					hc_sn = HC_copy(hct_old, hc_sl, hc_sn);
@@ -5574,11 +5575,9 @@ CA_MAIN(void) {
 					CA_CT* nwsc = NULL;									// new space
 					nwsc = malloc(nwsz * sizeof * nwsc);				// memory allocation for new space
 					if (!nwsc)
-// TODO __FUNCSIG__ dows not work with gcc						SIMFW_Die("malloc failed at %s (:%d)\n", __FUNCSIG__, __LINE__);
-						SIMFW_Die("malloc failed at %s (:%d)\n", "__FUNCSIG__", __LINE__);
+						SIMFW_Die("malloc failed at %s (:%d)\n", __FUNCSIG__, __LINE__);
 					else {
 						memset(nwsc, 0, nwsz * sizeof * nwsc);				// init new space to 0
-						tm = 0;
 						/* Copy old space into new space - centered */
 						memcpy(
 							max(nwsc, nwsc + (nwsz - last_ca_space_sz) / 2),
@@ -5594,17 +5593,6 @@ CA_MAIN(void) {
 						res = 1;
 					}
 				}
-
-				if (1 && (fscd || szcd || speed != org_speed))
-					SIMFW_SetFlushMsg(&sfw,
-						"SPEED   %.4es\nTIME    %.4ec\n        %.4es\nSIZE    %.4ec\n\nS-ZOOM  %d x %d\nP-ZOOM  %d x %d\nFOCUS   %d x %d",
-						(double)speed,
-						(double)tm, (double)tm / (double)ca_space_sz,
-						(double)ca_space_sz,
-						ds.vlzm, ds.hlzm,
-						ds.vlpz, ds.hlpz,
-						ds.vlfs, ds.hlfs);
-
 			}
 			if (x_shift > sfw.sim_width)
 				x_shift -= sfw.sim_width;
@@ -5624,21 +5612,38 @@ CA_MAIN(void) {
 			sfw.sim_canvas,
 			sfw.sim_canvas + sfw.sim_height * sfw.sim_width,
 			de, cnmd, klrg, ds);
-		// pixel_effect_moving_gradient(&sfw);
-		tm += speed;
-
+		// speed and time statistics
+		double dsd;					// speed in nr. of cells (double)
+		if (cnmd == CM_HASH) {
+			if (sdmrpt)
+				dsd = (double)ca_space_sz * pow(2.0, sdmrpt - 2.0);
+			else
+				dsd = 0.0;
+		}
+		else
+			dsd = (double)speed;
+		tm += dsd;
 		/* Update status */
+		if (fscd || speed != org_speed)
+			SIMFW_SetFlushMsg(&sfw,
+				"SPEED   %.4es\nTIME    %.4ec\nSIZE    %.4ec\n\nS-ZOOM  %d x %d\nP-ZOOM  %d x %d\nFOCUS   %d x %d",
+				dsd,
+				tm,
+				(double)ca_space_sz,
+				ds.vlzm, ds.hlzm,
+				ds.vlpz, ds.hlpz,
+				ds.vlfs, ds.hlfs);
+		//
 		SIMFW_UpdateStatistics(&sfw);
 		SIMFW_SetStatusText(&sfw,
-			"ZELLOSKOP   fps %.2f  cps #%.4e  sd %.2f  c# %.2e",
+			"ZELLOSKOP   fps %.2f  cps %.4e  sd %.2f  tm %.2e",
 			1.0 / sfw.avg_duration,
-			1.0 / sfw.avg_duration * speed * ca_space_sz,
-			1.0 * speed,
-			1.0 * tm * ca_space_sz);
+			1.0 / sfw.avg_duration * dsd * ca_space_sz,
+			1.0 * dsd,
+			tm);
 		SIMFW_UpdateDisplay(&sfw);
 		//
 		static LONGLONG fpstr = 0;
-		static uint64_t fpstm = 0;
 		double trdn = timeit_duration_nr(fpstr);		// fps-timer-duration
 		if (trdn >= 1.0) {
 			static int fccls = 1;
@@ -5659,28 +5664,18 @@ CA_MAIN(void) {
 			}
 			else
 				fccls = 1;
-			double ds;
-			if (cnmd == CM_HASH) {
-				if (sdmrpt)
-					ds = (double)ca_space_sz * 2 * pow(2.0, sdmrpt - 3.0);
-				else
-					ds = 0.0;
-			}
-			else
-				ds = (double)speed;
-			printf("cnmd %s  sz %.2e  sd %.2e  cs %.2e  tm %.2e\n",
+			printf("cnmd %s  sz %.2e  sd %.2e  cps %.2e  tm %.2e\n",
 				ca_cnsgs[cnmd].name,
 				(double)ca_space_sz,
-				ds,
-				ds * ca_space_sz / sfw.avg_duration, //ds* ca_space_sz / sfw.avg_duration / 8.0 / 1024.0 / 1024.0 / 1024.0,
-				(double)tm* ca_space_sz);
+				dsd,
+				dsd * ca_space_sz / sfw.avg_duration,
+				tm);
 			printf("%80s\n", "");
 			printf("%80s\n", "");
 			fpstr = 0;
 		}
 		if (!fpstr) {
 			fpstr = timeit_start();
-			fpstm = tm;
 		}
 	}
 
