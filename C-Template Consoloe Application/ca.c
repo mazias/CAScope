@@ -90,8 +90,8 @@ typedef struct caDisplaySettings {
 	int hlzm;										// horizontal zoom - how many horizontal cells will make out one pixel (together with vert. zoom); 0 = disable drawing, < 0 = how many horizontal pixels a cell will make out
 	int vlpz;										// vertical pixel zoom
 	int hlpz;										// horizontal pixel zoom
-	int stzm;										// state zoom - 0 = direct zoom on intensity
-	int sm;											// scanline-mode
+	int stzm;										// frequency analysis / state zoom - 0 = direct zoom on intensity
+	int oddm;										// one-dimensional display mode - 0: scroll, 1: scanline
 	int hddh;										// hash-display-depth
 	int hdll;										// hash-display-level
 	int mlsc;										// manual shift correction
@@ -548,7 +548,6 @@ csv and bav must allow for access of  (ct + (BPB - 1)) / BPB  elements
 void
 convert_bit_array_to_CA_CT(FBPT* bav, CA_CT* csv, int ct) {
 	int bib = 0;						// bit index in individual bit-block
-	ct /= BPB;
 loop:
 	*csv = (FBPT)1 & (*bav >> bib);
 	++csv;
@@ -557,8 +556,8 @@ loop:
 		goto loop;
 	bib = 0;
 	++bav;
-	--ct;
-	if (ct)
+	ct -= BPB;
+	if (ct >= BPB)
 		goto loop;
 
 	// Shorter version, but in assembler it is about the same length and seems (not really tested or benchmarked) to do more work
@@ -639,7 +638,6 @@ void
 convert_CA_CT_to_bit_array(CA_CT* csv, FBPT* bav, int ct) {
 	*bav = 0;							// must be zero'd, since individual bits are or'ed in
 	int bib = 0;						// bit index in individual bit-block
-	ct /= BPB;
 loop:
 	*bav |= (FBPT)*csv << bib;
 	++csv;
@@ -649,8 +647,8 @@ loop:
 	bib = 0;
 	++bav;
 	*bav = 0;							// must be zero'd, since individual bits are or'ed in - as ba.v always has to have an extra element, this also works when count is zero - this should make the if-jump below less complicated in asm
-	--ct;
-	if (ct)
+	ct -= BPB;
+	if (ct >= BPB)
 		goto loop;
 }
 
@@ -663,13 +661,13 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 	// build the LUT
 	_aligned_free(calt);
 	calt = _aligned_malloc(0x40000, 64);
-	// Precalculate all states of a space of 16 cells after 4 time steps.
+	// Precalculate all states of a space of 16 cells after 1, 2, 3 and 4 time steps = 4 * 16 bits * 8 bits = 4 * 2^16 bytes = 256 kilo bytes
 	// Ruleset: 2 states, 3 cells in a neighborhod
 	// After 4 time steps 8 cells (1 byte in binary representation) will remain
 	for (int dn = 1; dn < 5; ++dn) {				// duration-loop
 		UINT16 i = 0;								// cell-space-index
 		for (;;) {									// cell-space-loop
-            UINT16 cs = i;							// result cell-space
+            UINT16 cs = i;							// cell-space
 			// get result byte
 			for (int tm = 0; tm < dn; ++tm) {		// time-loop
 				for (int p = 0; p < 14; ++p) {
@@ -697,8 +695,9 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 
 int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
 	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz);
-
+	int64_t sc = 0;		// shift-correction
 	while (pgnc) {
+		printf("PGNC  %d\n", pgnc);
 		// copy wrap arround buffer
 		uint8_t* wb = vba->v;
 		wb[vba->scsz / 8] = wb[0];
@@ -706,12 +705,15 @@ int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
 		for (int bi = 0, sz = vba->scsz / 8; bi < sz; ++bi) {
 			UINT8* bya = vba->v;  // need to adress on byte-basis
 			bya += bi;
-			*bya = calt[(((UINT32)min(3, pgnc - 1)) << 16) | *(UINT16*)bya];
+			*bya = calt[(((UINT32)min(4, pgnc) - 1) << 16) | *(UINT16*)bya];
 		}
+		if (pgnc < 4)
+			sc = -4 + pgnc;
 		pgnc -= min(4, pgnc);
 	}
+	printf("  SC  %d\n", sc );
 
-	return 0;
+	return -1;
 }
 
 void CA_CNITFN_BOOL(caBitArray* vba, CA_RULE* cr) {
@@ -3664,32 +3666,28 @@ dblcmpfunc(const void* a, const void* b) {
 	return 0;
 }
 
+/*
+pixel-screen is a 4-byte rgba pixel array to draw to
 
+does scrolling itself!
+*/
 void
 lifeanddrawnewcleanzoom(
-	/*
-	pixel-screen is a 4-byte rgba pixel array to draw to
 
-	does scrolling itself!
-	*/
-	CA_RULE* cr,										// ca-rule configuration
-	CA_CT* sc,											// space
-	uint64_t scsz,										// space-size
-	int64_t tm,											// time - nr of generations to evolve
-	int res,											// ca-space-reset-flag
-	int dyrt,											// display-reset-flag
-	UINT32* pnv,										// pixel-screen first valid element
-	const UINT32* pni,									// pixel-screen first invalid element
-	int de,												// drawing enabled
-	caComputationMode cnmd,								// computation-mode
-	const unsigned int klrg,							// kernel-range (GPU mode)
-	caDisplaySettings ds								// display settings
+	CA_RULE* cr,												// ca-rule configuration
+	CA_CT* sc,													// space
+	uint64_t scsz,												// space-size
+	int64_t tm,													// time - nr of generations to evolve
+	int res,													// ca-space-reset-flag
+	int dyrt,													// display-reset-flag
+	UINT32* pnv,												// pixel-screen first valid element
+	const UINT32* pni,											// pixel-screen first invalid element
+	int de,														// drawing enabled
+	caComputationMode cnmd,										// computation-mode
+	const unsigned int klrg,									// kernel-range (GPU mode)
+	caDisplaySettings ds										// display settings
 )
 {
-	/* Abort if time is zero */
-	//if (tm <= 0)
-	//	return;
-
 	/* Check for maximum size of rule tables */
 	if (cr->nns > LV_MAXRLTLSZ) {
 		printf("ERROR max rule table size to small!");
@@ -3701,59 +3699,53 @@ lifeanddrawnewcleanzoom(
 		return;
 	}
 	/* Warn if hash-computation-mode is used with inappropiate settings */
-	if (cnmd == CM_HASH && !ds.sfcm)
-		printf("WARNING you need to enable screen-filling-curve-mode when using hash-computation-mode!\n");
-	// i guess not needed anymore, since sdmrpt is used in hash mode to control speed
-	//	if (cnmd == CM_HASH && tm < scsz / 2)
-	//		printf("WARNING speed must at least be half of space-size when using hash-computation-mode!  tm %d\n", tm);
-	//	if (cnmd == CM_HASH && ((tm & (tm - 1)) != 0 || (scsz & (scsz - 1)) != 0))
-	//		printf("WARNING speed and size must be power of 2 when using hash-computation-mode!\n");
-
-		/* Init vars and defines */
+	if (cnmd == CM_HASH) {
+		if (!ds.sfcm) {
+			printf("INFO screen-filling-curve-mode automatically enabled, since in hash-computation-mode.\n");
+			ds.sfcm = 1;
+		}
+	}
+	if (ds.fsme == 2 && cnmd != CM_HASH) {						// focus-mode can only be in hash-mode when computing-mode is in hash-mode as well
+		printf("INFO focus-mode set to absolute, since not in hash-computation-mode.\n");
+		ds.fsme = 0;
+	}
+	/* Init vars and defines */
 	ds.lgm %= 2;
 	if (!ds.vlfs || !ds.hlfs)
 		ds.stzm = 0;
-	int tma = 0;										// time available (as stored in pixel buffer)
-	UINT32* pnc = pni;									// pixel-screen cursor / current position
-
-	ds.hlzm = max(1, ds.hlzm);							// make sure zoom-levels are at least 1
+	UINT32* pnc = pni;											// pixel-screen cursor / current position
+	ds.hlzm = max(1, ds.hlzm);									// make sure zoom-levels are at least 1
 	ds.vlzm = max(1, ds.vlzm);
 	ds.hlpz = max(1, ds.hlpz);
 	ds.vlpz = max(1, ds.vlpz);
+	ds.vlzm = max(ds.vlzm, ds.vlfs);							// vertical zoom can not be larger than zoom since it not possible (atm) to go back to previous generatios=lines
+	if (ds.vlfs == 0 || ds.hlfs == 0)
+		ds.hlfs = ds.vlfs = 1;
 
-	int hwmn = 50;										// histogram-width-minimum
-	int hw = hwmn;										// histogram width
-	if (ds.sfcm)										// autosize of histogram-width when screen-filling-curve-mode is activated
+	int hwmn = 50;												// histogram-width-minimum
+	int hw = hwmn;												// histogram width
+	if (ds.sfcm)												// autosize of histogram-width when screen-filling-curve-mode is activated
 		hw = max(hwmn, ds.plw - ceil(sqrt(scsz)) * ds.hlpz * 2);
 
-	if (ds.fsme == 2 && cnmd != CM_HASH)				// focus-mode can only be in hash-mode when computing-mode is in hash-mode as well
-		ds.fsme = 0;
-
-	int pbs = 0;										// pixel-buffer-size (one line / space-size div horizontal-zoom)
+	int pbs = 0;												// pixel-buffer-size (one line / space-size div horizontal-zoom)
 	static int last_pbs = 0;
 	if (ds.fsme == 2)
 		pbs = scsz >> (HCTBSPT + ds.hdll);
 	else
 		pbs = scsz / ds.hlzm;
 	pbs = max(1, pbs);
-	const int stst = 0;									// state shift (nr. of state bits shifted out / disregarded)
-
-	ds.vlzm = max(ds.vlzm, ds.vlfs);					// vertical zoom can not be larger than zoom since it not possible (atm) to go back to previous generatios=lines
-	if (ds.vlfs == 0 || ds.hlfs == 0)
-		ds.hlfs = ds.vlfs = 1;
+	const int stst = 0;											// state shift (nr. of state bits shifted out / disregarded)
 
 	/* size of one buffer
 	buffer must be large enough to always allow for readahead for next-gen-calculation (cr->ncn)
 	or drawing-calucaltions (hlfs) */
-	int brsz = max(ds.hlfs - 1, cr->ncn - 1);			// buffer-size
+	int brsz = max(ds.hlfs - 1, cr->ncn - 1);					// buffer-size
 	// #TODO !! ??? Why is max 32 not enough???
 	brsz += 32;
 	brsz = max(1024, brsz);
 
-
-
 	/* Scanline-mode initialization */
-	static UINT32* spnc = NULL;							// static pixel screen cursor; needed for scanline mode
+	static UINT32* spnc = NULL;									// static pixel screen cursor; needed for scanline mode
 	if (!spnc || dyrt)
 		spnc = pnv;
 
@@ -3762,8 +3754,8 @@ lifeanddrawnewcleanzoom(
 	if (ds.sfcm) {
 		pnc = pnv;
 	}
-	// scroll-mode (scanline-mode disabled)
-	else if (!ds.sm) {
+	// scroll-mode
+	else if (ds.oddm == 0) {
 		/* Scroll pixel-screen to make room to draw tm pixels */
 		int64_t vlsl = tm / ds.vlzm * ds.vlpz;					// vertical scroll / lines to scroll
 		tm = vlsl * ds.vlzm / ds.vlpz;
@@ -3788,7 +3780,7 @@ lifeanddrawnewcleanzoom(
 	/* Clear screen on reset */
 	if (dyrt || res) {
 		UINT32* tpnc;
-		if (!ds.sm)												// only clear area that will be drawn to and leave scrolled away area intact when in scroll-mode
+		if (ds.oddm == 0)										// when in scroll-mode: only clear area that will be drawn to and leave scrolled away area intact when in scroll-mode
 			tpnc = pnc;
 		else													// clear whole screen when in scanline-mode or screen-filling-curve-mode
 			tpnc = pnv;
@@ -3828,7 +3820,7 @@ lifeanddrawnewcleanzoom(
 		// temporary code for debugging
 		if (cnmd == CM_HASH) {
 			if (tvba.v == NULL || res) {
-				_aligned_free(tvba.v);									// aligned memory management may be necesary for use of some intrinsic or opencl functions
+				_aligned_free(tvba.v);							// aligned memory management may be necesary for use of some intrinsic or opencl functions
 				tvba = (const struct caBitArray){ 0 };
 				tvba.cr = cr;
 				tvba.clsc = tcsv;
@@ -3899,16 +3891,16 @@ lifeanddrawnewcleanzoom(
 	default:
 		dyss = 0;
 	}
-	static UINT32* cltbl = NULL;							// color table
+	static UINT32* cltbl = NULL;								// color table
 	if (dyss && (!cltbl || dyrt)) {
 		free(cltbl);
 		cltbl = malloc(dyss * sizeof * cltbl);
 	}
 
 	/* Init state count table */
-	static UINT32* sctbl = NULL;							// state count table
-	static double* dsctbl = NULL;							// double state count table
-	static double* tdsctbl = NULL;							// temp double state count table
+	static UINT32* sctbl = NULL;								// state count table
+	static double* dsctbl = NULL;								// double state count table
+	static double* tdsctbl = NULL;								// temp double state count table
 	if (!sctbl || dyrt) {
 		free(sctbl);
 		sctbl = malloc(dyss * sizeof * sctbl);
@@ -3918,8 +3910,8 @@ lifeanddrawnewcleanzoom(
 		tdsctbl = malloc(dyss * sizeof * tdsctbl);
 	}
 	//
-	static double* spt = NULL;								// state position table
-	static double* svt = NULL;								// state velocity table
+	static double* spt = NULL;									// state position table
+	static double* svt = NULL;									// state velocity table
 	static int ltdyss = 0;
 	if (ltdyss != dyss) {
 		ltdyss = dyss;
@@ -3932,11 +3924,10 @@ lifeanddrawnewcleanzoom(
 	}
 
 	/* */
-	double dmn;												// double min
-	double dmx;												// double max
+	double dmn;													// double min
+	double dmx;													// double max
 
-	int64_t otm = tm;										// original time
-
+	int64_t otm = tm;											// original time
 	while (1) {
 		/* DISPLAY - Copy as much pixels as possible from the pixel-buffer to the pixel-screen.
 		   There are 3 drawing modes:
@@ -3955,8 +3946,14 @@ lifeanddrawnewcleanzoom(
 					if (pbs * ds.hlpz < ds.plw - hw)
 						pnc += hw + (ds.plw - pbs * ds.hlpz - hw) / 2;
 					/* Copy bixel-buffer to pixel-screen */
+					// horizontal-zoom disabled
+					if (ds.hlpz == 1) {
+						memcpy(pnc, pbc, cs * 4);
+						pbc = pbi;
+						pnc += cs;
+					}
 					// horizontal-zoom enabled
-					if (ds.hlpz > 1) {
+					else {
 						for (int hi = 0; hi < cs / ds.hlpz; ++hi) {
 							for (int hzi = 0; hzi < ds.hlpz; ++hzi) {
 								*pnc = *pbc;
@@ -3965,18 +3962,11 @@ lifeanddrawnewcleanzoom(
 							++pbc;
 						}
 					}
-					// horizontal-zoom disabled
-					else {
-						memcpy(pnc, pbc, cs * 4);
-						pbc = pbi;
-						pnc += cs;
-					}
 					/* Set pixel-screen-cursor to next line */
-					// scanline-mode disabled (scrolling enabled)
-					if (!ds.sm) {
+					if (ds.oddm == 0) {								// scroll-mode enabled
 						pnc += (pni - pnc) % ds.plw;
 						if (pnc >= pni)								// disable drawing if one complete screen (all available lines) has been drawn
-							de = 0;
+							;// de = 0;
 					}
 					// scanline-mode enabled
 					else {
@@ -3985,7 +3975,7 @@ lifeanddrawnewcleanzoom(
 						if (pnc >= pni)
 							pnc = pnv;
 						if (pnc == spnc)							// disable drawing if one complete screen (all available lines) has been drawn
-							de = 0;
+							;// de = 0;
 					}
 					// reset pixel-buffer-cursor
 					pbc = pbv;
@@ -4007,7 +3997,7 @@ lifeanddrawnewcleanzoom(
 		for (int vlp = 0; vlp < ds.vlzm; ++vlp) {
 			if (de && ds.fsme < 2) {
 				if (vlp == 0) {
-					/* Reset pbv accumulate buffer */
+					/* Reset pbv accumulation buffer */
 					memset(pbv, 0, (pbi - pbv) * sizeof * pbv);
 				}
 				if (vlp == 0 || vlp < ds.vlfs) {
@@ -4016,16 +4006,21 @@ lifeanddrawnewcleanzoom(
 				}
 			}
 			/* Calculate next generation */
-			int64_t ognc, gnc;							// (original) generations (scsz lines) to calculate
+			int64_t ognc, gnc;										// (original) generations (scsz lines) to calculate
 			ognc = tm;
 			if (vlp < ds.vlfs - 1 || (!ds.sfcm && de))
 				ognc = min(ognc, 1);
-			gnc = ognc;
 			// run selected computation function
-			gnc = (ca_cnsgs[cnmd].cnfn)(gnc, &vba);
+			gnc = (ca_cnsgs[cnmd].cnfn)(ognc, &vba);
+			// negative return values of the computation function signal a shift correction to that amount
+			int64_t sc = 0;											// shift-correction
+			if (gnc < 0) {
+				sc = gnc;
+				gnc = 0;
+			}
 			//
-			tm -= (ognc - gnc);											// adjust time
-			csf -= ((ognc - gnc) * (cr->ncn / 2) + ds.mlsc) % scsz;		// correct for shift
+			tm -= (ognc - gnc);										// adjust time
+			csf -= ((ognc - gnc) * (cr->ncn / 2) + ds.mlsc) % scsz;	// correct for shift
 			if (csf < csv)
 				csf += scsz;
 			if (csf >= csi)
@@ -4038,7 +4033,7 @@ lifeanddrawnewcleanzoom(
 				#define LOGPRECISION 4
 				#define LOGSCALE (1U<<LOGPRECISION)
 
-				unsigned int lgmd = ds.lgm;										// log-mode
+				unsigned int lgmd = ds.lgm;							// log-mode
 
 				// Color-table.
 				static UINT32 crtl[CRTLSZ] = { 0 };
@@ -4149,7 +4144,6 @@ lifeanddrawnewcleanzoom(
 							dsctbl[i] += dsctbl[i - 1];
 					}
 					else if (ds.cmm == 3) {
-						//
 						double pos = 1.0;
 						for (int i = 0; i < dyss; ++i) {
 							double d = dsctbl[i];
@@ -4365,7 +4359,7 @@ lifeanddrawnewcleanzoom(
 	}
 
 	/* Remember current screen-position when in scanline-mode */
-	if (ds.sm)
+	if (ds.oddm == 1)
 		spnc = pnc;
 	/* Copy space back with correct alignment */
 	if (ds.fsme < 2 || ds.tm == 2)
@@ -4572,7 +4566,7 @@ CA_MAIN(void) {
 	ds.tm = 0;
 	ds.sd = 1.0;
 	ds.te = 0.0;
-	ds.sm = 0;					// scanline-mode
+	ds.oddm = 0;				// one-dimensio´nal display-mode = scroll
 	ds.stzm = 1;				// state zoom - 0 = direct zoom on intensity
 	ds.sfcm = 1;				// screen-filling-curve-mode
 	ds.sfcsw = 1;				// screen-filling-curve-step-width
@@ -4646,6 +4640,13 @@ CA_MAIN(void) {
 		////nkb.slct_key = SDLK_F6;
 		//nkb.min = 0; nkb.max = 1024 * 8;
 		//SIMFW_AddKeyBindings(&sfw, nkb);
+		//
+		nkb = eikb;
+		nkb.name = "manual-shift-correction";
+		nkb.val = &ds.mlsc;
+		nkb.slct_key = SDLK_F9;
+		nkb.min = -(1 << 30); nkb.max = 1 << 30; nkb.wpad = 0;
+		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
 		nkb.name = "hash-cell-count-(computation-mode)";
@@ -4736,8 +4737,8 @@ CA_MAIN(void) {
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
-		nkb.name = "display-scanline-mode";
-		nkb.val = &ds.sm;
+		nkb.name = "one-dimensional display-mode - 0: scroll, 1: scanline";
+		nkb.val = &ds.oddm;
 		nkb.slct_key = SDLK_m;
 		nkb.min = 0; nkb.max = 1;
 		SIMFW_AddKeyBindings(&sfw, nkb);
@@ -4824,13 +4825,6 @@ CA_MAIN(void) {
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
-		nkb.name = "manual-shift-correction";
-		nkb.val = &ds.mlsc;
-		nkb.slct_key = SDLK_F10;
-		nkb.min = -(1 << 30); nkb.max = 1 << 30; nkb.wpad = 0;
-		SIMFW_AddKeyBindings(&sfw, nkb);
-		//
-		nkb = eikb;
 		nkb.name = "horizontal-focus";
 		nkb.val = &ds.hlfs;
 		SIMFW_AddKeyBindings(&sfw, nkb);
@@ -4901,7 +4895,6 @@ CA_MAIN(void) {
 		nkb.name = "window-y-position";
 		nkb.val = &window_y_position;
 		SIMFW_AddKeyBindings(&sfw, nkb);
-
 		/* Load configuration */
 		SIMFW_LoadKeyBindings(&sfw, "settings.txt");
 	}
@@ -5227,6 +5220,7 @@ CA_MAIN(void) {
 					clmd = CLMD_NONE;
 					SIMFW_ConsoleCLS();
 					SIMFW_SetFlushMsg(&sfw, "");
+					SIMFW_HandleKeyBinding(&sfw, e.key.keysym.sym);	// also cancel any active SIMFW key bindings
 					break;
 				case SDLK_F4:
 					goto behind_sdl_loop;
