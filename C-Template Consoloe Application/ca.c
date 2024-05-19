@@ -84,8 +84,7 @@ typedef struct caDisplaySettings {
 	int sfcm;										// screen-filling-curve-mode
 	int sfcsw;										// screen-filling-curve-step-width
 	int sfcmp;										// screen-filling-curve-mode-paramter
-	int vlfs;										// focus > nr. of hlfs cells next to eachother are summed... TODO
-	int hlfs;										// focus > nr. of hlfs cells next to eachother are summed... TODO
+	int hlfs;										// horizontal-focus > the nr. of cells next to eachother that are analyzed to give a color
 	int vlzm;										// vertical zoom - how many vertical cells will make out one pixel (together with hor. zoom); 0 = disable drawing, < 0 = how many vertical pixels a cell will make out
 	int hlzm;										// horizontal zoom - how many horizontal cells will make out one pixel (together with vert. zoom); 0 = disable drawing, < 0 = how many horizontal pixels a cell will make out
 	int vlpz;										// vertical pixel zoom
@@ -654,9 +653,12 @@ loop:
 
 static UINT8* calt = NULL;									// ca-lookup-table/LUT
 void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
+
 	_aligned_free(vba->v);
 	vba->ct = (vba->scsz + BPB - 1) / BPB * BPB + BPB;		// bit-array-count (rounded up / ceil) // allow one extra-element since when we process the last half block we read one half block past the end
 	vba->v = _aligned_malloc(vba->ct / 8, BYAL);
+
+	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz);
 
 	// build the LUT
 	_aligned_free(calt);
@@ -694,10 +696,9 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 }
 
 int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
-	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz);
 	int64_t sc = 0;		// shift-correction
 	while (pgnc) {
-		printf("PGNC  %d\n", pgnc);
+///		printf("PGNC  %d\n", pgnc);
 		// copy wrap arround buffer
 		uint8_t* wb = vba->v;
 		wb[vba->scsz / 8] = wb[0];
@@ -711,7 +712,7 @@ int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
 			sc = -4 + pgnc;
 		pgnc -= min(4, pgnc);
 	}
-	printf("  SC  %d\n", sc );
+///	printf("  SC  %d\n", sc );
 
 	return -1;
 }
@@ -720,11 +721,11 @@ void CA_CNITFN_BOOL(caBitArray* vba, CA_RULE* cr) {
 	_aligned_free(vba->v);
 	vba->ct = (vba->scsz + BPB - 1) / BPB * BPB + BPB;		// bit-array-count - round up count and allow one extra-element since when we process the last half block we read one half block past the end
 	vba->v = _aligned_malloc(vba->ct / 8, BYAL);
+
+	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz);
 }
 
 int64_t CA_CNFN_BOOL(int64_t pgnc, caBitArray* vba) {
-	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz + 8);
-
 	while (pgnc > 0) {
 		// copy wrap arround buffer
 		uint8_t* wb = vba->v;
@@ -2705,6 +2706,32 @@ struct {
 		.cnfn = CA_CNFN_DISABLED,
 		.itfn = CA_CNITFN_DISABLED
 	},
+	[CM_SISD] = {
+		.name = "CM_SISD",
+		.cnfn = CA_CNFN_SISD,
+	},
+	[CM_SIMD] = {
+		.name = "CM_SIMD",
+		.cnfn = CA_CNFN_SIMD,
+	},
+	[CM_BOOL] = {
+		.name = "CM_BOOL",
+		.cnfn = CA_CNFN_BOOL,
+		.itfn = CA_CNITFN_BOOL,
+		.scfn = CA_SCFN_HBA,
+	},
+	[CM_LUT] = {
+		.name = "CM_LUT",
+		.cnfn = CA_CNFN_LUT,
+		.itfn = CA_CNITFN_LUT,
+		.scfn = CA_SCFN_HBA,
+	},
+	[CM_HASH] = {
+		.name = "CM_HASH",
+		.cnfn = CA_CNFN_HASH,
+		.itfn = CA_CNITFN_HASH,
+		.scfn = CA_SCFN_HASH,
+	},
 	[CM_VBA_1x256] = {
 		.name = "CM_VBA_1x256",
 		.cnfn = CA_CNFN_VBA_1x256,
@@ -2758,32 +2785,6 @@ struct {
 		.cnfn = CA_CNFN_VBA_4x32,
 		.itfn = CA_CNITFN_VBA_4x32,
 		.scfn = CA_SCFN_VBA,
-	},
-	[CM_SISD] = {
-		.name = "CM_SISD",
-		.cnfn = CA_CNFN_SISD,
-	},
-	[CM_SIMD] = {
-		.name = "CM_SIMD",
-		.cnfn = CA_CNFN_SIMD,
-	},
-	[CM_BOOL] = {
-		.name = "CM_BOOL",
-		.cnfn = CA_CNFN_BOOL,
-		.itfn = CA_CNITFN_BOOL,
-		.scfn = CA_SCFN_HBA,
-	},
-	[CM_LUT] = {
-		.name = "CM_LUT",
-		.cnfn = CA_CNFN_LUT,
-		.itfn = CA_CNITFN_LUT,
-		.scfn = CA_SCFN_HBA,
-	},
-	[CM_HASH] = {
-		.name = "CM_HASH",
-		.cnfn = CA_CNFN_HASH,
-		.itfn = CA_CNITFN_HASH,
-		.scfn = CA_SCFN_HASH,
 	},
 };
 const char* cm_names[CM_MAX] = { 0 };	// flat array of strings of computation-function-names
@@ -3711,16 +3712,15 @@ lifeanddrawnewcleanzoom(
 	}
 	/* Init vars and defines */
 	ds.lgm %= 2;
-	if (!ds.vlfs || !ds.hlfs)
+	if (!ds.hlfs)
 		ds.stzm = 0;
 	UINT32* pnc = pni;											// pixel-screen cursor / current position
 	ds.hlzm = max(1, ds.hlzm);									// make sure zoom-levels are at least 1
 	ds.vlzm = max(1, ds.vlzm);
 	ds.hlpz = max(1, ds.hlpz);
 	ds.vlpz = max(1, ds.vlpz);
-	ds.vlzm = max(ds.vlzm, ds.vlfs);							// vertical zoom can not be larger than zoom since it not possible (atm) to go back to previous generatios=lines
-	if (ds.vlfs == 0 || ds.hlfs == 0)
-		ds.hlfs = ds.vlfs = 1;
+	if (ds.hlfs == 0)
+		ds.hlfs = 1;
 
 	int hwmn = 50;												// histogram-width-minimum
 	int hw = hwmn;												// histogram width
@@ -3858,8 +3858,10 @@ lifeanddrawnewcleanzoom(
 					vba.clsc = csv;
 					int mcr = memcmp(csv, ctcsv, scsz * sizeof * csv);
 					free(ctcsv);
-					if (mcr != 0)
+					if (mcr != 0) {
 						printf("\tERROR  mcr %d  sz %d\n", mcr, scsz * sizeof * csv);
+						getch();
+					}
 					else
 						printf("\tsuccess\n");
 				}
@@ -3883,10 +3885,10 @@ lifeanddrawnewcleanzoom(
 	int dyss;
 	switch (ds.fsme) {
 	case 0:
-		dyss = max(1, (cr->ncs * (max(1, max(1, ds.hlfs) * max(1, ds.vlfs)))) >> stst);
+		dyss = max(1, (cr->ncs * (max(1, max(1, ds.hlfs)))) >> stst);
 		break;
 	case 1:
-		dyss = max(1, ipow(cr->ncs, ds.hlfs * ds.vlfs) >> stst);
+		dyss = max(1, ipow(cr->ncs, ds.hlfs) >> stst);
 		break;
 	default:
 		dyss = 0;
@@ -3935,103 +3937,11 @@ lifeanddrawnewcleanzoom(
 		   * 2. 1d-scanline-mode - a scanline moves repeatedly from top to bottom, new ca-lines are drawn at current scanline position
 		   * 3. screen-filling-curve-mode - the 1d ca-line is drawn on the 2d screen using one of several screen-filling-curves
 		*/
-		if (de && pbc < pbi && pnc < pni) {
-			/* Line-mode (scroll or scanline) */
-			if (!ds.sfcm) {
-				for (int vi = 0; vi < ds.vlpz; ++vi) {
-					int cs = min(ds.plw, min((pni - pnc), ds.hlpz * (pbi - pbc)));		// size of copy
-					/* Horizontal-centering */
-					if (pbs * ds.hlpz > ds.plw - hw)
-						pbc = pbv + (pbs * ds.hlpz - ds.plw - hw) / 2 / ds.hlpz;
-					if (pbs * ds.hlpz < ds.plw - hw)
-						pnc += hw + (ds.plw - pbs * ds.hlpz - hw) / 2;
-					/* Copy bixel-buffer to pixel-screen */
-					// horizontal-zoom disabled
-					if (ds.hlpz == 1) {
-						memcpy(pnc, pbc, cs * 4);
-						pbc = pbi;
-						pnc += cs;
-					}
-					// horizontal-zoom enabled
-					else {
-						for (int hi = 0; hi < cs / ds.hlpz; ++hi) {
-							for (int hzi = 0; hzi < ds.hlpz; ++hzi) {
-								*pnc = *pbc;
-								++pnc;
-							}
-							++pbc;
-						}
-					}
-					/* Set pixel-screen-cursor to next line */
-					if (ds.oddm == 0) {								// scroll-mode enabled
-						pnc += (pni - pnc) % ds.plw;
-						if (pnc >= pni)								// disable drawing if one complete screen (all available lines) has been drawn
-							;// de = 0;
-					}
-					// scanline-mode enabled
-					else {
-						if (pbs < ds.plw)
-							pnc = pnv + ((pnc - pnv) / ds.plw + 1) * ds.plw;
-						if (pnc >= pni)
-							pnc = pnv;
-						if (pnc == spnc)							// disable drawing if one complete screen (all available lines) has been drawn
-							;// de = 0;
-					}
-					// reset pixel-buffer-cursor
-					pbc = pbv;
-				}
-			}
-			/* Screen-filling-curve-modes */
-			else if (ds.sfcm <= 4)
-				display_2d_matze(pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcm - 1, ds.sfcmp);
-			else if (ds.sfcm < 5 + LMS_COUNT)
-				display_2d_lindenmeyer(LMSA[ds.sfcm - 5], pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcsw, -1, NULL, NULL, NULL);
-			else
-				display_2d_chaotic(pnv + hw, pni, ds.plw, ds.plw - hw, csv, csi, pbv, pbi, dyrt);
-		}
-
-		if (tm < 1)
-			break;
-
-		/* EVOLVE - Calculate next generation(s) of CA */
-		for (int vlp = 0; vlp < ds.vlzm; ++vlp) {
-			if (de && ds.fsme < 2) {
-				if (vlp == 0) {
-					/* Reset pbv accumulation buffer */
-					memset(pbv, 0, (pbi - pbv) * sizeof * pbv);
-				}
-				if (vlp == 0 || vlp < ds.vlfs) {
-					/* Count states */
-					ca_count__simd(csv, csf, csi, pbv, pbi, ds.hlzm, ds.hlfs, ds.fsme, cr->ncs);
-				}
-			}
-			/* Calculate next generation */
-			int64_t ognc, gnc;										// (original) generations (scsz lines) to calculate
-			ognc = tm;
-			if (vlp < ds.vlfs - 1 || (!ds.sfcm && de))
-				ognc = min(ognc, 1);
-			// run selected computation function
-			gnc = (ca_cnsgs[cnmd].cnfn)(ognc, &vba);
-			// negative return values of the computation function signal a shift correction to that amount
-			int64_t sc = 0;											// shift-correction
-			if (gnc < 0) {
-				sc = gnc;
-				gnc = 0;
-			}
-			//
-			tm -= (ognc - gnc);										// adjust time
-			csf -= ((ognc - gnc) * (cr->ncn / 2) + ds.mlsc) % scsz;	// correct for shift
-			if (csf < csv)
-				csf += scsz;
-			if (csf >= csi)
-				csf -= scsz;
-		}
-
-		if (de) {
+		if (de && pnc < pni) {
 			if (ds.fsme == 2 && cnmd == CM_HASH) {
-				#define CRTLSZ (1 << 10)
-				#define LOGPRECISION 4
-				#define LOGSCALE (1U<<LOGPRECISION)
+#define CRTLSZ (1 << 10)
+#define LOGPRECISION 4
+#define LOGSCALE (1U<<LOGPRECISION)
 
 				unsigned int lgmd = ds.lgm;							// log-mode
 
@@ -4090,9 +4000,14 @@ lifeanddrawnewcleanzoom(
 				for (int i = 0; i < dyss; ++i)
 					sctbl[i] = 0;
 				// Count states
-				if (ds.stzm || ds.ar)
+				if (ds.stzm || ds.ar) {
+					/* Reset pbv accumulation buffer */
+					memset(pbv, 0, (pbi - pbv) * sizeof * pbv);
+					/* Count states */
+					ca_count__simd(csv, csf, csi, pbv, pbi, ds.hlzm, ds.hlfs, ds.fsme, cr->ncs);
 					for (UINT32* pbc = pbv; pbc < pbi; ++pbc)
 						++sctbl[(*pbc) >> stst];
+				}
 				// Init min and max and state count table
 				dmn = 1.0;
 				if (!ds.stzm) {
@@ -4213,7 +4128,80 @@ lifeanddrawnewcleanzoom(
 					*pbc = getColor(1.0 / (pbi - pbv) * (pbc - pbv), ds.cm, ds.crct, ds.gm);
 			// Move pixel-buffer cursor to beginning
 			pbc = pbv;
+
+			/* Line-mode (scroll or scanline) */
+			if (!ds.sfcm) {
+				for (int vi = 0; vi < ds.vlpz; ++vi) {
+					int cs = min(ds.plw, min((pni - pnc), ds.hlpz * (pbi - pbc)));		// size of copy
+					/* Horizontal-centering */
+					if (pbs * ds.hlpz > ds.plw - hw)
+						pbc = pbv + (pbs * ds.hlpz - ds.plw - hw) / 2 / ds.hlpz;
+					if (pbs * ds.hlpz < ds.plw - hw)
+						pnc += hw + (ds.plw - pbs * ds.hlpz - hw) / 2;
+					/* Copy bixel-buffer to pixel-screen */
+					// horizontal-zoom disabled
+					if (ds.hlpz == 1) {
+						memcpy(pnc, pbc, cs * 4);
+						pbc = pbi;
+						pnc += cs;
+					}
+					// horizontal-zoom enabled
+					else {
+						for (int hi = 0; hi < cs / ds.hlpz; ++hi) {
+							for (int hzi = 0; hzi < ds.hlpz; ++hzi) {
+								*pnc = *pbc;
+								++pnc;
+							}
+							++pbc;
+						}
+					}
+					/* Set pixel-screen-cursor to next line */
+					if (ds.oddm == 0) {								// scroll-mode enabled
+						pnc += (pni - pnc) % ds.plw;
+					}
+					// scanline-mode enabled
+					else {
+						if (pbs < ds.plw)
+							pnc = pnv + ((pnc - pnv) / ds.plw + 1) * ds.plw;
+						if (pnc >= pni)
+							pnc = pnv;
+						if (pnc == spnc)							// disable drawing if one complete screen (all available lines) has been drawn
+							de = 0;
+					}
+				}
+			}
+			/* Screen-filling-curve-modes */
+			else if (ds.sfcm <= 4)
+				display_2d_matze(pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcm - 1, ds.sfcmp);
+			else if (ds.sfcm < 5 + LMS_COUNT)
+				display_2d_lindenmeyer(LMSA[ds.sfcm - 5], pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcsw, -1, NULL, NULL, NULL);
+			else
+				display_2d_chaotic(pnv + hw, pni, ds.plw, ds.plw - hw, csv, csi, pbv, pbi, dyrt);
 		}
+
+		/* EVOLVE - Calculate next generation(s) of CA */
+		/* Calculate next generation */
+		int64_t ognc, gnc;										// (original) generations (scsz lines) to calculate
+		ognc = tm;
+		if (!ds.sfcm && de)
+			ognc = min(ognc, ds.vlzm);
+		// run selected computation function
+		gnc = (ca_cnsgs[cnmd].cnfn)(ognc, &vba);
+		// negative return values of the computation function signal a shift correction to that amount
+		int64_t sc = 0;											// shift-correction
+		if (gnc < 0) {
+			sc = gnc;
+			gnc = 0;
+		}
+		//
+		tm -= (ognc - gnc);										// adjust time
+		csf -= ((ognc - gnc) * (cr->ncn / 2) + ds.mlsc) % scsz;	// correct for shift
+		if (csf < csv)
+			csf += scsz;
+		if (csf >= csi)
+			csf -= scsz;
+		if (tm < 1)
+			break;
 	}
 
 	/* Test calculation */
@@ -4571,7 +4559,6 @@ CA_MAIN(void) {
 	ds.sfcm = 1;				// screen-filling-curve-mode
 	ds.sfcsw = 1;				// screen-filling-curve-step-width
 	ds.hlfs = 1;				/* focus / sharpening mode */
-	ds.vlfs = 1;				/* focus / sharpening mode */
 	ds.vlzm = 1;				/* vertical zoom */
 	ds.hlzm = 1;				/* horizontal zoom */
 	ds.vlpz = 1;				/* vertical pixel zoom */
@@ -4830,11 +4817,6 @@ CA_MAIN(void) {
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
-		nkb.name = "vertical-focus";
-		nkb.val = &ds.vlfs;
-		SIMFW_AddKeyBindings(&sfw, nkb);
-		//
-		nkb = eikb;
 		nkb.name = "horizontal-zoom";
 		nkb.val = &ds.hlzm;
 		SIMFW_AddKeyBindings(&sfw, nkb);
@@ -4955,7 +4937,7 @@ CA_MAIN(void) {
 	while (1) {
 		/* SDL event handling */
 		SDL_Event e;
-		int fscd = 0;									// focus (hlfs, vlfs, vlzm, hlzm) has been changed
+		int fscd = 0;									// focus (hlfs, vlzm, hlzm) has been changed
 		int64_t org_speed = speed;
 		uint64_t last_ca_space_sz = ca_space_sz;
 		UINT32 HCISZPTLV = HCISZPT;						// HCISZPT last value - must be initialized to be same value as HCISZPT
@@ -5523,13 +5505,11 @@ CA_MAIN(void) {
 				case SDLK_k:
 					if (ctl)		ds.vlzm++;
 					else if (sft)	ds.vlpz++;
-					else			ds.vlfs++;
 					fscd = 1;
 					break;
 				case SDLK_l:
 					if (ctl)		ds.vlzm--;
 					else if (sft)	ds.vlpz--;
-					else			ds.vlfs--;
 					fscd = 1;
 					break;
 				default:
@@ -5541,7 +5521,6 @@ CA_MAIN(void) {
 				ds.hlzm = max(1, ds.hlzm);
 				ds.vlpz = max(1, ds.vlpz);
 				ds.hlpz = max(1, ds.hlpz);
-				ds.vlfs = max(0, ds.vlfs);
 				ds.hlfs = max(0, ds.hlfs);
 
 				if (fscd)
@@ -5620,13 +5599,13 @@ CA_MAIN(void) {
 		/* Update status */
 		if (fscd || speed != org_speed)
 			SIMFW_SetFlushMsg(&sfw,
-				"SPEED   %.4es\nTIME    %.4ec\nSIZE    %.4ec\n\nS-ZOOM  %d x %d\nP-ZOOM  %d x %d\nFOCUS   %d x %d",
+				"SPEED   %.4es\nTIME    %.4ec\nSIZE    %.4ec\n\nS-ZOOM  %d x %d\nP-ZOOM  %d x %d\nFOCUS   %d",
 				dsd,
 				tm,
 				(double)ca_space_sz,
 				ds.vlzm, ds.hlzm,
 				ds.vlpz, ds.hlpz,
-				ds.vlfs, ds.hlfs);
+				ds.hlfs);
 		//
 		SIMFW_UpdateStatistics(&sfw);
 		SIMFW_SetStatusText(&sfw,
