@@ -67,7 +67,7 @@ int sdmrpt;											// hash-array - speed-multiplicator-as-power-of-two - 1 me
 
 
 typedef struct caDisplaySettings {
-	int fsme;										// focus-mode - 0: absolute, 1: totalistic, 2: frequency - only in hash computing mode
+	int fsme;										// focus-mode - 0: totalistic, 1: absolute, 2: frequency - only in hash computing mode
 	int tm;											// test mode - 0: disabled, 1: graphics, 2: computation
 	unsigned int ar;								// auto-range - 0: none, 1: auto min, 2: auto max, 3: auto min and max
 	double ard;										// auto-range delay
@@ -76,9 +76,9 @@ typedef struct caDisplaySettings {
 	unsigned int crct;								// color count
 	unsigned int gm;								// gradient mode
 	unsigned int lgm;								// log mode
-	unsigned int cmm;								// cumulative mode
-	double sd;										// spread - range: 0.0 - +2.0; 1.0 = disabled
-	double te;										// translate - range: -1.0 - +1.0 / 0.0 = disabled
+	unsigned int cmm;								// cumulative mode - 0: diabled, 1: sorted, 2: unsorted
+	double sd;										// spread - range - 0.0 - +2.0; 1.0 = disabled
+	double te;										// translate - range - -1.0 - +1.0 / 0.0 = disabled
 	UINT32 plw;										// pixel-screen line width
 	unsigned int pnp;								// pixel-screen pitch // currently ignored
 	int sfcm;										// screen-filling-curve-mode
@@ -3707,7 +3707,7 @@ lifeanddrawnewcleanzoom(
 		}
 	}
 	if (ds.fsme == 2 && cnmd != CM_HASH) {						// focus-mode can only be in hash-mode when computing-mode is in hash-mode as well
-		printf("INFO focus-mode set to absolute, since not in hash-computation-mode.\n");
+		printf("INFO focus-mode set to totalistic, since not in hash-computation-mode.\n");
 		ds.fsme = 0;
 	}
 	/* Init vars and defines */
@@ -3808,6 +3808,13 @@ lifeanddrawnewcleanzoom(
 		csi = csv + scsz;
 		memcpy(csv, sc, scsz * sizeof * csv);
 	}
+	// apply manual shift correction
+	csf += ds.mlsc;
+	while (csf < csv)
+		csf += scsz;
+	while (csf >= csi)
+		csf -= scsz;
+
 	/* Init testing-cell-space-buffer */
 	static CA_CT* tcsv = NULL;									// test-cell-array first valid element
 	// temporary code for debugging
@@ -4001,12 +4008,22 @@ lifeanddrawnewcleanzoom(
 					sctbl[i] = 0;
 				// Count states
 				if (ds.stzm || ds.ar) {
-					/* Reset pbv accumulation buffer */
+					// Reset pbv accumulation buffer
 					memset(pbv, 0, (pbi - pbv) * sizeof * pbv);
-					/* Count states */
+					// Copy border
+					memcpy(csv + scsz, csv, brsz * sizeof * csv);
+					// Count states
 					ca_count__simd(csv, csf, csi, pbv, pbi, ds.hlzm, ds.hlfs, ds.fsme, cr->ncs);
 					for (UINT32* pbc = pbv; pbc < pbi; ++pbc)
 						++sctbl[(*pbc) >> stst];
+				}
+				else {
+					CA_CT* csc = csf;
+					for (UINT32* pbc = pbv; pbc < pbi; ++pbc, ++csc) {
+						if (csc >= csi)
+							csc -= csi - csv;
+						*pbc = *csc;
+					}
 				}
 				// Init min and max and state count table
 				dmn = 1.0;
@@ -4039,6 +4056,7 @@ lifeanddrawnewcleanzoom(
 						}
 					}
 					// Cumulative modes
+					// sort by state count and than stack on top each other
 					if (ds.cmm == 1) {
 						///qsort(dsctbl, dyss, sizeof(double), dblcmpfunc);
 						// use temp table to store sctbl while calculating cumulative sums
@@ -4054,25 +4072,14 @@ lifeanddrawnewcleanzoom(
 								dsctbl[i] = sm;
 							}
 					}
+					// stack on top of each other without chaning order
 					else if (ds.cmm == 2) {
 						for (int i = 1; i < dyss; ++i)
 							dsctbl[i] += dsctbl[i - 1];
 					}
-					else if (ds.cmm == 3) {
-						double pos = 1.0;
-						for (int i = 0; i < dyss; ++i) {
-							double d = dsctbl[i];
-							if (d > 0.0) {
-								dsctbl[i] = pos + d / 2.0;
-								pos += d;
-							}
-						}
-						dmn = 1.0;
-						dmx = pos;
-					}
 				}
 				// Get min and max of state count table
-				if (ds.ar && ds.cmm != 3) {
+				if (ds.ar) {
 					if (ds.ar == 1 || ds.ar == 3)
 						dmn = DBL_MAX;
 					if (ds.ar == 2 || ds.ar == 3)
@@ -4195,7 +4202,7 @@ lifeanddrawnewcleanzoom(
 		}
 		//
 		tm -= (ognc - gnc);										// adjust time
-		csf -= ((ognc - gnc) * (cr->ncn / 2) + ds.mlsc) % scsz;	// correct for shift
+		csf -= ((ognc - gnc) * (cr->ncn / 2)) % scsz;			// correct for shift
 		if (csf < csv)
 			csf += scsz;
 		if (csf >= csi)
@@ -4692,7 +4699,7 @@ CA_MAIN(void) {
 		nkb.name = "display-cumulative-mode";
 		nkb.val = &ds.cmm;
 		nkb.slct_key = SDLK_n;
-		nkb.min = 0; nkb.max = 3;
+		nkb.min = 0; nkb.max = 2;
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
@@ -4962,7 +4969,7 @@ CA_MAIN(void) {
 				}
 			}
 			else if (mouse_speed_control && e.type == SDL_MOUSEMOTION) {
-				int ty = speed / ca_space_sz;
+				int ty = speed;
 				int tx = speed % ca_space_sz;
 				if (ctl)
 					tx = 0;
@@ -4987,7 +4994,7 @@ CA_MAIN(void) {
 						e.motion.x /= 4;
 					ty -= e.motion.y;
 					tx -= e.motion.x;
-					speed = max(0, ty * ca_space_sz + tx);
+					speed = max(0, ty);
 					SDL_WarpMouseInWindow(sfw.window, 50, 50);
 				}
 			}
@@ -5390,7 +5397,7 @@ CA_MAIN(void) {
 						res = 1;
 						double dy = pow(2.0, random01());	// density
 						if (sft) {
-							cnt = 64;
+							cnt = 4;
 							dy = 1.0;
 						}
 						if (ctl) {
