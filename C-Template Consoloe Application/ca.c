@@ -7,6 +7,7 @@
 #include "float.h"
 #include "hp_timer.h"						// high performance timing functions
 #include "pcg_basic.h"						// random number generator library
+#include <assert.h>
 
 // defines for gcc
 #define MAXUINT16 ((UINT16)~ ((UINT16)0))
@@ -1034,7 +1035,6 @@ void CA_CNITFN_VBA_1x256(caBitArray* vba, CA_RULE* cr) {
 	vba->bcpt = 0;
 	initCAVerticalBitArray(vba, cr);
 	convertBetweenCACTandCABitArray(vba, 0);
-//	getch();
 }
 
 int64_t CA_CNFN_VBA_1x32(int64_t pgnc, caBitArray* vba) {
@@ -2934,7 +2934,7 @@ CA_Rule(CA_RULE prl) {
 	else
 		prl.nns = ipow(prl.ncs, prl.ncn);
 	/* Number of rules */
-	prl.nrls = ipow(prl.ncs, prl.nns); // TODO does not behove well due to integer overflow on high numbers
+	prl.nrls = ipow(prl.ncs, prl.nns);
 	if (prl.nrls == 0)
 		prl.nrls = MAXUINT64;
 	// Make sure rule is within range of number of rules
@@ -3674,7 +3674,6 @@ does scrolling itself!
 */
 void
 lifeanddrawnewcleanzoom(
-
 	CA_RULE* cr,												// ca-rule configuration
 	CA_CT* sc,													// space
 	uint64_t scsz,												// space-size
@@ -3714,7 +3713,7 @@ lifeanddrawnewcleanzoom(
 	ds.lgm %= 2;
 	if (!ds.hlfs)
 		ds.stzm = 0;
-	UINT32* pnc = pni;											// pixel-screen cursor / current position
+	UINT32* pnc = pnv;											// pixel-screen cursor / current position
 	ds.hlzm = max(1, ds.hlzm);									// make sure zoom-levels are at least 1
 	ds.vlzm = max(1, ds.vlzm);
 	ds.hlpz = max(1, ds.hlpz);
@@ -3750,42 +3749,43 @@ lifeanddrawnewcleanzoom(
 		spnc = pnv;
 
 	/* Inititalize pixel-display-cursor */
-	// screen-filling-curve mode
-	if (ds.sfcm) {
-		pnc = pnv;
-	}
-	// scroll-mode
-	else if (ds.oddm == 0) {
-		/* Scroll pixel-screen to make room to draw tm pixels */
-		int64_t vlsl = tm / ds.vlzm * ds.vlpz;					// vertical scroll / lines to scroll
-		tm = vlsl * ds.vlzm / ds.vlpz;
-		int hlsl = 0;											// horizontal scroll
-		///hw = 0;
-				// horizontal scrolling is disabled atm since it does not work together with the histogram
-				// and is only possible when output-width and display-width are the same
-				// if (pbs == plw)
-				//     hlsl = min(plw, (tm % (scsz * vlzm)) / max(1, vlzm * hlzm));				// horizontal scroll / nr. of pixels to scroll
-		if (vlsl * ds.plw < pni - pnv) {
-			pnc = max(pnv, pni - vlsl * ds.plw - hlsl);			// set cursor to first pixel that has to be drawn
-			scroll(pnv, (pni - pnv) * 4, -4 * (pni - pnc));		// scroll is measured in nr of pixels > convert to argb-pixel with size of 4 byte
+	if (!ds.sfcm) {
+		// scroll-mode
+		if (ds.oddm == 0) {
+			/* Scroll pixel-screen to make room to draw tm pixels */
+			int64_t vlsl = tm / ds.vlzm * ds.vlpz;					// vertical scroll / lines to scroll
+			tm = vlsl * ds.vlzm / ds.vlpz;
+			int hlsl = 0;											// horizontal scroll
+			///hw = 0;
+					// horizontal scrolling is disabled atm since it does not work together with the histogram
+					// and is only possible when output-width and display-width are the same
+					// if (pbs == plw)
+					//     hlsl = min(plw, (tm % (scsz * vlzm)) / max(1, vlzm * hlzm));				// horizontal scroll / nr. of pixels to scroll
+			if (vlsl == 0) {
+				pnc = max(pnv, pni - ds.vlpz * ds.plw);
+			}
+			else if (vlsl * ds.plw < pni - pnv) {
+				pnc = max(pnv, pni - vlsl * ds.plw - hlsl);			// set cursor to first pixel that has to be drawn
+				scroll(pnv, (pni - pnv) * 4, -4 * (pni - pnc));		// scroll is measured in nr of pixels > convert to argb-pixel with size of 4 byte
+			}
+			else
+				pnc = pnv;
 		}
-		else
-			pnc = pnv;
-	}
-	// scanline-mode
-	else {
-		pnc = spnc;
+		// scanline-mode
+		else {
+			pnc = spnc;
+		}
 	}
 
-	/* Clear screen on reset */
+	/* Clear screen on display-reset */
 	if (dyrt || res) {
 		UINT32* tpnc;
 		if (ds.oddm == 0)										// when in scroll-mode: only clear area that will be drawn to and leave scrolled away area intact when in scroll-mode
-			tpnc = pnc;
+			tpnc = max(pnv, pnc - ds.plw * ds.vlpz);
 		else													// clear whole screen when in scanline-mode or screen-filling-curve-mode
 			tpnc = pnv;
 		for (; tpnc < pni; ++tpnc)
-			*tpnc = 0;
+			*tpnc = 0x666666;
 	}
 
 	/* Init pixel-buffer */
@@ -3944,7 +3944,7 @@ lifeanddrawnewcleanzoom(
 		   * 2. 1d-scanline-mode - a scanline moves repeatedly from top to bottom, new ca-lines are drawn at current scanline position
 		   * 3. screen-filling-curve-mode - the 1d ca-line is drawn on the 2d screen using one of several screen-filling-curves
 		*/
-		if (de && pnc < pni) {
+		if (de) {
 			if (ds.fsme == 2 && cnmd == CM_HASH) {
 #define CRTLSZ (1 << 10)
 #define LOGPRECISION 4
@@ -3998,6 +3998,7 @@ lifeanddrawnewcleanzoom(
 						lcol = *pbc;
 					}
 				}
+				de = 0;
 			}
 			else {
 				// Sync cell-space
@@ -4116,6 +4117,7 @@ lifeanddrawnewcleanzoom(
 									svt[i] = svt[i] - svt[i] * ds.ard + (dsctbl[i] - spt[i]) * ds.arf;
 									spt[i] += svt[i];
 									*/
+					// TODO - this does not use force/arf
 					spt[i] += (dsctbl[i] - spt[i]) * ds.ard;
 					dsctbl[i] = spt[i];
 					dsctbl[i] = max(0.0, dsctbl[i]);
@@ -4133,18 +4135,17 @@ lifeanddrawnewcleanzoom(
 			if (ds.tm == 1)
 				for (UINT32* pbc = pbv; pbc < pbi; ++pbc)
 					*pbc = getColor(1.0 / (pbi - pbv) * (pbc - pbv), ds.cm, ds.crct, ds.gm);
-			// Move pixel-buffer cursor to beginning
-			pbc = pbv;
-
 			/* Line-mode (scroll or scanline) */
 			if (!ds.sfcm) {
-				for (int vi = 0; vi < ds.vlpz; ++vi) {
-					int cs = min(ds.plw, min((pni - pnc), ds.hlpz * (pbi - pbc)));		// size of copy
+				for (int vi = 0; vi < ds.vlpz; ++vi) {					
+					pbc = pbv;										// Move pixel-buffer cursor to beginning
+					int cs = min(ds.plw - hw, min((pni - pnc), ds.hlpz * (pbi - pbc) - ds.plw % ds.hlpz));		// copy-size
 					/* Horizontal-centering */
 					if (pbs * ds.hlpz > ds.plw - hw)
-						pbc = pbv + (pbs * ds.hlpz - ds.plw - hw) / 2 / ds.hlpz;
+						pnc += hw,
+						pbc = pbv + (pbs * ds.hlpz - ds.plw + hw) / ds.hlpz / 2;
 					if (pbs * ds.hlpz < ds.plw - hw)
-						pnc += hw + (ds.plw - pbs * ds.hlpz - hw) / 2;
+						pnc += hw + (ds.plw - hw - pbs * ds.hlpz) / 2;
 					/* Copy bixel-buffer to pixel-screen */
 					// horizontal-zoom disabled
 					if (ds.hlpz == 1) {
@@ -4163,13 +4164,16 @@ lifeanddrawnewcleanzoom(
 						}
 					}
 					/* Set pixel-screen-cursor to next line */
-					if (ds.oddm == 0) {								// scroll-mode enabled
-						pnc += (pni - pnc) % ds.plw;
+					pnc += (pni - pnc) % ds.plw;					// move to beginning of next line
+					// scroll-mode enabled
+					if (ds.oddm == 0) {								
+						if (pnc >= pni)
+							de = 0;
 					}
 					// scanline-mode enabled
 					else {
-						if (pbs < ds.plw)
-							pnc = pnv + ((pnc - pnv) / ds.plw + 1) * ds.plw;
+						//if (pbs < ds.plw)
+						//	pnc = pnv + ((pnc - pnv) / ds.plw + 1) * ds.plw;
 						if (pnc >= pni)
 							pnc = pnv;
 						if (pnc == spnc)							// disable drawing if one complete screen (all available lines) has been drawn
@@ -4178,12 +4182,17 @@ lifeanddrawnewcleanzoom(
 				}
 			}
 			/* Screen-filling-curve-modes */
-			else if (ds.sfcm <= 4)
-				display_2d_matze(pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcm - 1, ds.sfcmp);
-			else if (ds.sfcm < 5 + LMS_COUNT)
-				display_2d_lindenmeyer(LMSA[ds.sfcm - 5], pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcsw, -1, NULL, NULL, NULL);
-			else
-				display_2d_chaotic(pnv + hw, pni, ds.plw, ds.plw - hw, csv, csi, pbv, pbi, dyrt);
+			else {
+				// Move pixel-buffer cursor to beginning
+				pbc = pbv;
+				if (ds.sfcm <= 4)
+					display_2d_matze(pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcm - 1, ds.sfcmp);
+				else if (ds.sfcm < 5 + LMS_COUNT)
+					display_2d_lindenmeyer(LMSA[ds.sfcm - 5], pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcsw, -1, NULL, NULL, NULL);
+				else
+					display_2d_chaotic(pnv + hw, pni, ds.plw, ds.plw - hw, csv, csi, pbv, pbi, dyrt);
+				de = 0;
+			}
 		}
 
 		/* EVOLVE - Calculate next generation(s) of CA */
@@ -4256,13 +4265,13 @@ lifeanddrawnewcleanzoom(
 	/* Histogram */
 	if (hw > 0) {
 		int plh = (pni - pnv) / ds.plw;
-		int vs = 20;							// vertical spacing to screen border of histogram
-		int hh = plh - 2 * vs;					// histogram height
-		int dph = 3;// hh / 100;				// histogram height of one datapoint
+		int vs = 20;											// vertical spacing to screen border of histogram
+		int hh = plh - 2 * vs;									// histogram height
+		int dph = 3;// hh / 100;								// histogram height of one datapoint
 		/* history */
-		static uint16_t* hy = NULL;				// history
-		static int hyc = 0;						// history count
-		static int hyi = -1;					// history iterator
+		static uint16_t* hy = NULL;								// history
+		static int hyc = 0;										// history count
+		static int hyi = -1;									// history iterator
 		if (hyc != hw * dyss) {
 			hyc = hw * dyss;
 			free(hy);
@@ -4283,7 +4292,7 @@ lifeanddrawnewcleanzoom(
 		}
 		/* states */
 		double rng = max(DBL_EPSILON, dmx - dmn);
-		for (int md = 0; md < 2; ++md) {					// go through modes (see below where used)
+		for (int md = 0; md < 2; ++md) {						// go through modes (see below where used)
 			for (int i = 0; i < dyss; ++i) {
 				//printf("Info  # %d  st %.2f  mn %.2f mx %.2f  sv %d\n", i, dsctbl[i], dmn, dmx, sv);
 				int sbc = dsctbl[i] * hh;		// state bar center of y-histogram-cord
@@ -4428,7 +4437,7 @@ CA_RandomizeHashSpace(int rs, int zero_position)
 {
 	if (rs <= 0)
 		return;
-	//assert(HCTBSPT == 2 && "HCTBSPT must be 2"); // TODO why does this not compile???
+	assert(HCTBSPT == 2 && "HCTBSPT must be 2");
 	SIMFW_SetFlushMsg(&sfw, "hash-cells random size  %d  (use ctl to select leftmost node)\n", rs);
 	memset(&hcln, 0, sizeof(hcln));				// reset hash-cells-left-node
 	// create a random hash-node of given size
@@ -4561,15 +4570,15 @@ CA_MAIN(void) {
 	ds.tm = 0;
 	ds.sd = 1.0;
 	ds.te = 0.0;
-	ds.oddm = 0;				// one-dimensio´nal display-mode = scroll
-	ds.stzm = 1;				// state zoom - 0 = direct zoom on intensity
-	ds.sfcm = 1;				// screen-filling-curve-mode
-	ds.sfcsw = 1;				// screen-filling-curve-step-width
-	ds.hlfs = 1;				/* focus / sharpening mode */
-	ds.vlzm = 1;				/* vertical zoom */
-	ds.hlzm = 1;				/* horizontal zoom */
-	ds.vlpz = 1;				/* vertical pixel zoom */
-	ds.hlpz = 1;				/* horizontal pixel zoom */
+	ds.oddm = 0;
+	ds.stzm = 1;
+	ds.sfcm = 1;
+	ds.sfcsw = 1;
+	ds.hlfs = 1;
+	ds.vlzm = 1;
+	ds.hlzm = 1;
+	ds.vlpz = 1;
+	ds.hlpz = 1;
 	ds.sfcmp = 0;
 	ds.hddh = 0;
 	ds.hdll = 0;
@@ -4734,6 +4743,7 @@ CA_MAIN(void) {
 		nkb.name = "one-dimensional display-mode - 0: scroll, 1: scanline";
 		nkb.val = &ds.oddm;
 		nkb.slct_key = SDLK_m;
+		nkb.cgfg = &dyrt;
 		nkb.min = 0; nkb.max = 1;
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
