@@ -94,6 +94,7 @@ typedef struct caDisplaySettings {
 	int oddm;										// one-dimensional display mode - 0: scroll, 1: scanline
 	int hddh;										// hash-display-depth
 	int hdll;										// hash-display-level
+	int hdmd;										// hash-display-mode
 	int mlsc;										// manual shift correction
 } caDisplaySettings;
 caDisplaySettings ds;								// display settings
@@ -1221,6 +1222,11 @@ void HC_print_stats() {
 
 		if (i && hc_stats[i].nc <= 3 && !hc_stats[i].sc && i < HCTMXLV - 2)
 			continue;
+		double avgsk;
+		if (hc_stats[i].ss == 0 || abs(hc_stats[i].sc) == 0)
+			avgsk = 0.0;
+		else
+			avgsk = (double)hc_stats[i].ss / ((double)hc_stats[i].sc);
 		printf("%2d  % 8.2e % 4.0f%%  % 8.2e % 6.1f%%  % 8.2e  % 8.2e  % 8.2e % 6.2f  %8.2e  %2d\n",
 			i,
 			(double)hc_stats[i].nc,
@@ -1230,7 +1236,7 @@ void HC_print_stats() {
 			(double)hc_stats[i].rcct,
 			(double)hc_stats[i].adct,
 			(double)hc_stats[i].ss,
-			(double)hc_stats[i].ss / max(1.0, abs((double)hc_stats[i].sc)),
+			avgsk,
 			(double)((UINT64)HCTBS << i),
 			i);
 	}
@@ -1374,17 +1380,21 @@ returns index of found or added branch - if newly created this will have a uc (u
 				hc_stats[ll].nc++;
 				hc_stats[ll].adct++;
 				// Add new branch / entry to hashtable
+				HCI fm, fmr, sl, slr, sr, srr, tb, lrt, lrn, rrt, rln;
 				hct[cm].uc = ((UINT32)ll << 24) | 1;
 				hct[cm].ln = ln;
-				hct[cm].rn = rn;
 				hct[ln].uc++;
+				lrt = hct[ln].r;
+				lrn = hct[ln].rn;
+				hct[cm].rn = rn;
 				hct[rn].uc++;
+				rrt = hct[rn].r;
+				rln = hct[rn].ln;
 				// Query result node - first pass.
-				HCI fm, fmr, sl, slr, sr, srr, tb;
-				fm = HC_find_or_add_branch(ll - 1, hct[ln].rn, hct[rn].ln, &fmr); // middle-result
+				fm = HC_find_or_add_branch(ll - 1, lrn, rln, &fmr); // middle-result
 				// Second pass.
-				sl = HC_find_or_add_branch(ll - 1, hct[ln].r, fmr, &slr);
-				sr = HC_find_or_add_branch(ll - 1, fmr, hct[rn].r, &srr);
+				sl = HC_find_or_add_branch(ll - 1, lrt, fmr, &slr);
+				sr = HC_find_or_add_branch(ll - 1, fmr, rrt, &srr);
 				// Third pass.
 				tb = HC_find_or_add_branch(ll - 1, slr, srr, NULL);
 				hct[cm].r = tb;
@@ -1620,7 +1630,7 @@ UINT32* old_display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, 
 
 //__declspec(noinline)
 UINT32*
-display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, int pll, HCI n, UINT32* pmxv, UINT32* pmnv) {
+display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, int pll, HCI n, int dymd, UINT32* pmxv, UINT32* pmnv) {
 //	printf("xxx");
 	int hpn[HCTMXLV] = { 0 };		// heap-node
 	char hplnd[HCTMXLV] = { 0 };		// heap-left-node-done
@@ -1633,20 +1643,19 @@ display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, int pll, HCI n, UINT32
 	int hddh = ds.hddh;
 	int hdll = ds.hdll;
 
-	UINT32 mxv; UINT32 mnv;
+	UINT32 mxv; 
+	UINT32 mnv;
 	mxv = 0;
 	mnv = MAXUINT32;
 	//printf("%d %d, ", ll, pll);
 	while (ll <= pll) {
-		if (hddh >= 0) {
-			if (ll >= hddh + hdll) {
-//				v *= max(1, (hct[n].uc & HCUCMK));
-				v += hct[n].uc & HCUCMK;
+		if ((hddh >= 0 && ll >= hddh + hdll) || ll == hddh * -1 - 1 + hdll) {
+			switch (dymd) {
+				case 0: v += (hct[n].uc & HCUCMK);						break;
+				case 1: v += (hct[n].uc & HCUCMK) << (pll - ll);		break;
+				case 2: v += (hct[n].uc & HCUCMK) << (ll - hdll);		break;
+				case 3: v *= (hct[n].uc & HCUCMK);						break;
 			}
-		}
-		else {
-			if (ll == hddh * -1 - 1 + hdll)
-				v += hct[n].uc & HCUCMK;
 		}
 
 		if (ll <= hdll) {
@@ -1739,7 +1748,7 @@ void HC_init_base_nodes(CA_RULE cr) {
 			cm = ((cm32 >> HCISZPT) ^ cm32);
 			cm &= HCIMASK;
 
-			hct[cm].uc = 1;		// level is 0
+			hct[cm].uc = 1;		// level is 0, so we never want it do be deleted/reused, even if it is currently unused
 			hct[cm].ln = ln;
 			hct[cm].rn = rn;
 			hct[cm].r = rt;
@@ -3959,42 +3968,44 @@ lifeanddrawnewcleanzoom(
 						crtl[i] = getColor((double)i / (CRTLSZ - 1.0), ds.cm, ds.crct, ds.gm);
 
 				//
-				UINT32 mxv = 0;													// max v
-				UINT32 mnv = 0;													// min v
-				UINT32 rgv = 1;													// range v
+				UINT32 mxv;														// max v
+				UINT32 mnv;														// min v
+				double rgv = 1.0;												// range v
 
-				display_hash_array(pbv, pbv, pbi, hc_sl, hc_sn, &mxv, &mnv);
+				display_hash_array(pbv, pbv, pbi, hc_sl, hc_sn, ds.hdmd, &mxv, &mnv);
+				//mxv = 0;
+				//mnv = MAXUINT32;
+				//for (UINT32* pbc = pbv; pbc < pbi; ++pbc) {
+				//	if (*pbc > mxv)
+				//		mxv = *pbc;
+				//	if (*pbc < mnv)
+				//		mnv = *pbc;
+				//}
+//				printf("mnv %d  mx %u / %.2f%%\n", mnv, mxv, 100.0 / MAXUINT32 * mxv);
 
-				rgv = max(1, mxv - mnv);
-				//double mnlgv = log2((double)mnv);
-				//double mxlgv = log2((double)mxv);
-				double mnlgv;
-				double mxlgv;
-				double rglgv;
-				if (lgmd) {
-					mnlgv = (double)(log2fix(mnv << LOGPRECISION, LOGPRECISION)) / LOGSCALE;
-					mxlgv = (double)(log2fix(mxv << LOGPRECISION, LOGPRECISION)) / LOGSCALE;
-					rglgv = max(1.0, mxlgv - mnlgv);
-				}
+				if (lgmd)
+					rgv = max(1.0, log2(mxv - mnv + 1));
+				else
+					rgv = max(1.0, mxv - mnv);
 
 				//if (!(rand()%10))
 				//	printf("mnv %u  mxv %u   fxlgmnv %f  fxlgmxv %f   lgmnv %f  lgmxv %f\n", mnv, mxv, mnlgv, mxlgv, log2(mnv), log2(mxv));
 
 				double v;
 				UINT32 lpbc = *pbc + 1, lcol = 0;
-				for (UINT32* pbc = pbv; pbc < pbi; pbc++) {
+				for (UINT32* pbc = pbv; pbc < pbi; ++pbc) {
 					if (*pbc == lpbc)
 						*pbc = lcol;
 					else {
 						if (lgmd) {
 							//printf("%.2e  %.2e\n", (((double)log2fix(*pbc* LOGSCALE, LOGPRECISION)) / LOGSCALE), log2((double)*pbc));
-							v = ((((double)log2fix(*pbc << LOGPRECISION, LOGPRECISION)) / LOGSCALE) - mnlgv) / rglgv;
-							//v = (log2((double)*pbc) - mnlgv) / rglgv;
+							//v = ((((double)log2fix(*pbc << LOGPRECISION, LOGPRECISION)) / LOGSCALE) - mnlgv) / rglgv;
+							v = log2((double)(*pbc - mnv + 1)) / rgv;
 						}
 						else
-							v = ((double)*pbc - (double)mnv) / (double)rgv;
+							v = (double)(*pbc - mnv) / rgv;
 						lpbc = *pbc;
-						*pbc = crtl[(int)(v * (CRTLSZ - 1) + .5)];
+						*pbc = crtl[(int)floor(v  * (CRTLSZ - 1) + .5)];
 						lcol = *pbc;
 					}
 				}
@@ -4199,8 +4210,8 @@ lifeanddrawnewcleanzoom(
 		/* Calculate next generation */
 		int64_t ognc, gnc;										// (original) generations (scsz lines) to calculate
 		ognc = tm;
-		if (!ds.sfcm && de)
-			ognc = min(ognc, ds.vlzm);
+//		if (!ds.sfcm && de)
+//			ognc = min(ognc, ds.vlzm);
 		// run selected computation function
 		gnc = (ca_cnsgs[cnmd].cnfn)(ognc, &vba);
 		// negative return values of the computation function signal a shift correction to that amount
@@ -4225,7 +4236,9 @@ lifeanddrawnewcleanzoom(
 		// calculate test-cell-space to compare
 // temporary code for debugging
 		if (cnmd == CM_HASH) {
-			CA_CNFN_VBA_1x256(otm, &tvba);
+
+			printf("otm %u  sdmrpt ######################### %d\n\n", ca_space_sz * (uint32_t)1<<(sdmrpt-2), sdmrpt);
+			CA_CNFN_VBA_1x256(ca_space_sz * ((uint32_t)1 << max(sdmrpt - 2,1)), &tvba);
 			CA_SCFN_VBA(&tvba);
 		}
 		// end temporary code
@@ -4367,8 +4380,12 @@ lifeanddrawnewcleanzoom(
 		spnc = pnc;
 	/* Copy space back with correct alignment */
 	if (ds.fsme < 2 || ds.tm == 2)
-		for (int i = 0; i < scsz; ++i)
-			sc[i] = csv[(csf - csv + i) % scsz];
+		for (int i = 0; i < scsz; ++i) {
+			CA_CT csc = csf - csv + i;
+			if (csc > scsz)
+				csc -= scsz;
+			sc[i] = csv[csc];
+		}
 }
 
 
@@ -4822,6 +4839,13 @@ CA_MAIN(void) {
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
+		nkb.name = "hash-display-mode";
+		nkb.val = &ds.hdmd;
+		nkb.slct_key = SDLK_t;
+		nkb.min = 0; nkb.max = 3; nkb.wpad = 1;
+		SIMFW_AddKeyBindings(&sfw, nkb);
+		//
+		nkb = eikb;
 		nkb.name = "hash-display-level";
 		nkb.val = &ds.hdll; nkb.cgfg = &dyrt;
 		nkb.slct_key = SDLK_u;
@@ -5248,21 +5272,21 @@ CA_MAIN(void) {
 						res = 1;
 					}
 					break;
-				case SDLK_t:
-					if (cnmd == CM_HASH) {
-						SIMFW_SetFlushMsg(&sfw, "Not supported while using hash-computation-mode!");
-					}
-					else {
-						cr.rl = (((UINT64)pcg32_random_r(&pcgr)) << 32 | pcg32_random_r(&pcgr)) % cr.nrls;
-						cr = CA_Rule(cr);
-						CA_RandomizeLinearSpace(ca_space, ca_space_sz, cr.ncs, ipow(2, pcg32_boundedrand(10)), 3);
-						char buf[10000] = "";
-						CA_RULE_PrintInfo(&cr, &buf, sizeof(buf));
-						SIMFW_SetFlushMsg(&sfw, &buf);
-						tm = 0.0;
-						res = 1;
-					}
-					break;
+				//case SDLK_t:
+				//	if (cnmd == CM_HASH) {
+				//		SIMFW_SetFlushMsg(&sfw, "Not supported while using hash-computation-mode!");
+				//	}
+				//	else {
+				//		cr.rl = (((UINT64)pcg32_random_r(&pcgr)) << 32 | pcg32_random_r(&pcgr)) % cr.nrls;
+				//		cr = CA_Rule(cr);
+				//		CA_RandomizeLinearSpace(ca_space, ca_space_sz, cr.ncs, ipow(2, pcg32_boundedrand(10)), 3);
+				//		char buf[10000] = "";
+				//		CA_RULE_PrintInfo(&cr, &buf, sizeof(buf));
+				//		SIMFW_SetFlushMsg(&sfw, &buf);
+				//		tm = 0.0;
+				//		res = 1;
+				//	}
+				//	break;
 				case SDLK_BACKSPACE:
 					if (cnmd == CM_HASH) {
 						if (sft) {
@@ -5283,6 +5307,7 @@ CA_MAIN(void) {
 							}
 							int tdc = 0;											// total-deleted-count
 							int pc = 0;												// passes-count
+							int maxuc = 0;
 							while (1) {
 								int cdc = 0;										// current-deleted-count
 								for (HCI i = HCTBS + 1; i < HCISZ; i++) {			// go through all nodes, except the base-nodes
@@ -5296,6 +5321,8 @@ CA_MAIN(void) {
 										hc_stats[rcll].nc--;
 										hc_stats[rcll].rcct++;
 									}
+									else
+										maxuc = max(maxuc, (hct[i].uc & HCUCMK));
 								}
 								pc++;
 								tdc += cdc;
@@ -5327,7 +5354,7 @@ CA_MAIN(void) {
 							}
 							*/
 
-							SIMFW_SetFlushMsg(&sfw, "removed unused nodes\nchecked  %d  hash-cells\npasses   %d\ndeleted  %d", HCISZ, pc, tdc);
+							SIMFW_SetFlushMsg(&sfw, "removed unused nodes\nchecked  %d  hash-cells\npasses   %d\ndeleted  %d\nmaxuc    %d  %.2f%%", HCISZ, pc, tdc, maxuc, 100.0 / (double)HCUCMK * (double)maxuc);
 						}
 					}
 					else {
@@ -5549,7 +5576,7 @@ CA_MAIN(void) {
 					hct_old = hct;
 					hct = _aligned_malloc(HCISZ * sizeof(HCN), 256);
 					if (!hct) {
-						SIMFW_Die("malloc failed at %s (:%d)\n", __FUNCSIG__, __LINE__);
+						SIMFW_Die("malloc failed at %s (:%d), requested size %e\n", __FUNCSIG__, __LINE__, (double)HCISZ * sizeof(HCN));
 						return;
 					}
 
@@ -5635,7 +5662,7 @@ CA_MAIN(void) {
 		//
 		static LONGLONG fpstr = 0;
 		double trdn = timeit_duration_nr(fpstr);		// fps-timer-duration
-		if (trdn >= 1.0) {
+		if (trdn >= 1.0 / 60.0 * 60.0) {
 			static int fccls = 1;
 			if (cnmd == CM_HASH) {
 				if (fccls)
@@ -5643,14 +5670,6 @@ CA_MAIN(void) {
 				fccls = 0;
 				SIMFW_ConsoleSetCursorPosition(0, 0);
 				HC_print_stats();
-				if (sdmrpt)
-					for (int i = 0; i < HCTMXLV - 2; i++) {
-						hc_stats[i].fc = 0;
-						hc_stats[i].rcct = 0;
-						hc_stats[i].adct = 0;
-						hc_stats[i].sc = 0;
-						hc_stats[i].ss = 0;
-					}
 			}
 			else
 				fccls = 1;
@@ -5664,6 +5683,14 @@ CA_MAIN(void) {
 			printf("%80s\n", "");
 			fpstr = 0;
 		}
+		if (sdmrpt)
+			for (int i = 0; i < HCTMXLV - 2; i++) {
+				hc_stats[i].fc = 0;
+				hc_stats[i].rcct = 0;
+				hc_stats[i].adct = 0;
+				hc_stats[i].sc = 0;
+				hc_stats[i].ss = 0;
+			}
 		if (!fpstr) {
 			fpstr = timeit_start();
 		}

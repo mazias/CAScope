@@ -611,26 +611,48 @@ SIMFW_SetStatusText(SIMFW *simfw, const char *format, ...) {
 
 
 void
-SIMFW_SetFlushMsg(SIMFW *sfw, const char *format, ...) {
+SIMFW_SetFlushMsg(SIMFW *sfw, char const* const format, ...) {
 	if (format == NULL) {
 		SDL_DestroyTexture(sfw->flush_msg_texture);
 		sfw->flush_msg_texture = NULL;
 		return;
 	}
 
-	// local vars
-	char status_text_str[10000];
-	// access optional parameters
-	va_list argptr;
-	va_start(argptr, format);
 	//
-	vsprintf_s(status_text_str, sizeof status_text_str, format, argptr);
-	//
+	va_list args;
+	int len;
+	char* buffer;
 
-	SIMFW_RenderStringOnTexture(sfw, &sfw->flush_msg_texture, status_text_str, sfw->window_width * 3 / 4);
+	va_start(args, format);
+	len = _vscprintf(format, args) // _vscprintf doesn't count
+		+ 1; // terminating '\0'
+	buffer = (char*)malloc(len * sizeof(char));
+	// does have problems with format errors - i dont know why
+	if (len > 1 && NULL != buffer)
+	{
+		vsprintf_s(buffer, len, format, args);
+		SIMFW_RenderStringOnTexture(sfw, &sfw->flush_msg_texture, buffer, sfw->window_width * 3 / 4);
+		free(buffer);
+	}
+	else {
+		SIMFW_RenderStringOnTexture(sfw, &sfw->flush_msg_texture, "sprintf output error", sfw->window_width * 3 / 4);
+	}
+	va_end(args);
+
+	//// local vars
+	//char status_text_str[10000];
+	//// access optional parameters
+	//va_list argptr;
+	//va_start(argptr, format);
+	////
+	//if (vsprintf_s(status_text_str, sizeof status_text_str, format, argptr) <= 0)
+	//	strncpy_s(status_text_str, 100, "sprintf output error", _TRUNCATE);
+	////
+
+	//SIMFW_RenderStringOnTexture(sfw, &sfw->flush_msg_texture, status_text_str, sfw->window_width * 3 / 4);
 
 	/* Cleanup */
-	va_end(argptr);
+	//va_end(argptr);
 }
 
 
