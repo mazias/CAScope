@@ -548,7 +548,6 @@ csv and bav must allow for access of  (ct + (BPB - 1)) / BPB  elements
 void
 convert_bit_array_to_CA_CT(FBPT* bav, CA_CT* csv, int ct) {
 	int bib = 0;						// bit index in individual bit-block
-	ct /= BPB;
 loop:
 	*csv = (FBPT)1 & (*bav >> bib);
 	++csv;
@@ -557,8 +556,8 @@ loop:
 		goto loop;
 	bib = 0;
 	++bav;
-	--ct;
-	if (ct)
+	ct -= BPB;
+	if (ct >= BPB)
 		goto loop;
 
 	// Shorter version, but in assembler it is about the same length and seems (not really tested or benchmarked) to do more work
@@ -639,7 +638,6 @@ void
 convert_CA_CT_to_bit_array(CA_CT* csv, FBPT* bav, int ct) {
 	*bav = 0;							// must be zero'd, since individual bits are or'ed in
 	int bib = 0;						// bit index in individual bit-block
-	ct /= BPB;
 loop:
 	*bav |= (FBPT)*csv << bib;
 	++csv;
@@ -649,8 +647,8 @@ loop:
 	bib = 0;
 	++bav;
 	*bav = 0;							// must be zero'd, since individual bits are or'ed in - as ba.v always has to have an extra element, this also works when count is zero - this should make the if-jump below less complicated in asm
-	--ct;
-	if (ct)
+	ct -= BPB;
+	if (ct >= BPB)
 		goto loop;
 }
 
@@ -663,13 +661,13 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 	// build the LUT
 	_aligned_free(calt);
 	calt = _aligned_malloc(0x40000, 64);
-	// Precalculate all states of a space of 16 cells after 4 time steps.
+	// Precalculate all states of a space of 16 cells after 1, 2, 3 and 4 time steps = 4 * 16 bits * 8 bits = 4 * 2^16 bytes = 256 kilo bytes
 	// Ruleset: 2 states, 3 cells in a neighborhod
 	// After 4 time steps 8 cells (1 byte in binary representation) will remain
 	for (int dn = 1; dn < 5; ++dn) {				// duration-loop
 		UINT16 i = 0;								// cell-space-index
 		for (;;) {									// cell-space-loop
-            UINT16 cs = i;							// result cell-space
+            UINT16 cs = i;							// cell-space
 			// get result byte
 			for (int tm = 0; tm < dn; ++tm) {		// time-loop
 				for (int p = 0; p < 14; ++p) {
@@ -697,8 +695,9 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 
 int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
 	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz);
-
+	int64_t sc = 0;		// shift-correction
 	while (pgnc) {
+		printf("PGNC  %d\n", pgnc);
 		// copy wrap arround buffer
 		uint8_t* wb = vba->v;
 		wb[vba->scsz / 8] = wb[0];
@@ -706,12 +705,15 @@ int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
 		for (int bi = 0, sz = vba->scsz / 8; bi < sz; ++bi) {
 			UINT8* bya = vba->v;  // need to adress on byte-basis
 			bya += bi;
-			*bya = calt[(((UINT32)min(3, pgnc - 1)) << 16) | *(UINT16*)bya];
+			*bya = calt[(((UINT32)min(4, pgnc) - 1) << 16) | *(UINT16*)bya];
 		}
+		if (pgnc < 4)
+			sc = -4 + pgnc;
 		pgnc -= min(4, pgnc);
 	}
+	printf("  SC  %d\n", sc );
 
-	return 0;
+	return -1;
 }
 
 void CA_CNITFN_BOOL(caBitArray* vba, CA_RULE* cr) {
@@ -3709,7 +3711,7 @@ lifeanddrawnewcleanzoom(
 	//	if (cnmd == CM_HASH && ((tm & (tm - 1)) != 0 || (scsz & (scsz - 1)) != 0))
 	//		printf("WARNING speed and size must be power of 2 when using hash-computation-mode!\n");
 
-		/* Init vars and defines */
+	/* Init vars and defines */
 	ds.lgm %= 2;
 	if (!ds.vlfs || !ds.hlfs)
 		ds.stzm = 0;
@@ -3749,8 +3751,6 @@ lifeanddrawnewcleanzoom(
 	// #TODO !! ??? Why is max 32 not enough???
 	brsz += 32;
 	brsz = max(1024, brsz);
-
-
 
 	/* Scanline-mode initialization */
 	static UINT32* spnc = NULL;							// static pixel screen cursor; needed for scanline mode
@@ -4020,11 +4020,16 @@ lifeanddrawnewcleanzoom(
 			ognc = tm;
 			if (vlp < ds.vlfs - 1 || (!ds.sfcm && de))
 				ognc = min(ognc, 1);
-			gnc = ognc;
 			// run selected computation function
-			gnc = (ca_cnsgs[cnmd].cnfn)(gnc, &vba);
+			gnc = (ca_cnsgs[cnmd].cnfn)(ognc, &vba);
+			// negative return values of the computation function signal a shift correction to that amount
+			int64_t sc = 0;		// shift-correction
+			if (gnc < 0) {
+				sc = gnc;
+				gnc = 0;
+			}
 			//
-			tm -= (ognc - gnc);											// adjust time
+			tm -= (ognc - gnc);													// adjust time
 			csf -= ((ognc - gnc) * (cr->ncn / 2) + ds.mlsc) % scsz;		// correct for shift
 			if (csf < csv)
 				csf += scsz;
@@ -4648,6 +4653,13 @@ CA_MAIN(void) {
 		//SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
+		nkb.name = "manual-shift-correction";
+		nkb.val = &ds.mlsc;
+		nkb.slct_key = SDLK_F9;
+		nkb.min = -(1 << 30); nkb.max = 1 << 30; nkb.wpad = 0;
+		SIMFW_AddKeyBindings(&sfw, nkb);
+		//
+		nkb = eikb;
 		nkb.name = "hash-cell-count-(computation-mode)";
 		nkb.description = "hash-cell-index-size as power of two";
 		nkb.val = &HCISZPT;
@@ -4824,13 +4836,6 @@ CA_MAIN(void) {
 		SIMFW_AddKeyBindings(&sfw, nkb);
 		//
 		nkb = eikb;
-		nkb.name = "manual-shift-correction";
-		nkb.val = &ds.mlsc;
-		nkb.slct_key = SDLK_F10;
-		nkb.min = -(1 << 30); nkb.max = 1 << 30; nkb.wpad = 0;
-		SIMFW_AddKeyBindings(&sfw, nkb);
-		//
-		nkb = eikb;
 		nkb.name = "horizontal-focus";
 		nkb.val = &ds.hlfs;
 		SIMFW_AddKeyBindings(&sfw, nkb);
@@ -4901,7 +4906,6 @@ CA_MAIN(void) {
 		nkb.name = "window-y-position";
 		nkb.val = &window_y_position;
 		SIMFW_AddKeyBindings(&sfw, nkb);
-
 		/* Load configuration */
 		SIMFW_LoadKeyBindings(&sfw, "settings.txt");
 	}
@@ -5227,6 +5231,7 @@ CA_MAIN(void) {
 					clmd = CLMD_NONE;
 					SIMFW_ConsoleCLS();
 					SIMFW_SetFlushMsg(&sfw, "");
+					SIMFW_HandleKeyBinding(&sfw, e.key.keysym.sym);	// also cancel any active SIMFW key bindings
 					break;
 				case SDLK_F4:
 					goto behind_sdl_loop;
