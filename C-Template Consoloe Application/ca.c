@@ -198,20 +198,20 @@ int32_t log2fix(uint32_t x, size_t precision)
 #define FNV1_32_INIT ((UINT32)0x811c9dc5)
 #define FNV1_32A_INIT FNV1_32_INIT
 
-/*
- * fnv_32a_buf - perform a 32 bit Fowler/Noll/Vo FNV-1a hash on a buffer
- *
- * input:
- *	buf	- start of buffer to hash
- *	len	- length of buffer in octets
- *	hval	- previous hash value or 0 if first call
- *
- * returns:
- *	32 bit hash as a static hash type
- *
- * NOTE: To use the recommended 32 bit FNV-1a hash, use FNV1_32A_INIT as the
- * 	 hval arg on the first call to either fnv_32a_buf() or fnv_32a_str().
- */
+ /*
+  * fnv_32a_buf - perform a 32 bit Fowler/Noll/Vo FNV-1a hash on a buffer
+  *
+  * input:
+  *	buf	- start of buffer to hash
+  *	len	- length of buffer in octets
+  *	hval	- previous hash value or 0 if first call
+  *
+  * returns:
+  *	32 bit hash as a static hash type
+  *
+  * NOTE: To use the recommended 32 bit FNV-1a hash, use FNV1_32A_INIT as the
+  * 	 hval arg on the first call to either fnv_32a_buf() or fnv_32a_str().
+  */
 UINT32
 fnv_32a_buf(void* buf, size_t len, UINT32 hval)
 {
@@ -229,9 +229,9 @@ fnv_32a_buf(void* buf, size_t len, UINT32 hval)
 		/* multiply by the 32 bit FNV magic prime mod 2^32 */
 //#if defined(NO_FNV_GCC_OPTIMIZATION)
 		hval *= FNV_32_PRIME;
-//#else
-//		hval += (hval << 1) + (hval << 4) + (hval << 7) + (hval << 8) + (hval << 24);
-//#endif
+		//#else
+		//		hval += (hval << 1) + (hval << 4) + (hval << 7) + (hval << 8) + (hval << 24);
+		//#endif
 	}
 
 	/* return our new hash value */
@@ -404,10 +404,10 @@ CABitArrayPrepareOL(caBitArray* ba) {
 	int ofszbt = ba->oc * (1 << (ba->rwpt - 3));			// overflow-size in bytes
 	int	to = 1 << bbrwpt;
 	for (int b = 0; b < 1 << ba->bcpt; ++b) {
-		BBT* cb = ba->v + ((((b + 0))			* ba->bh) << bbrwpt);		// current-block
-		BBT* nb = ba->v + ((((b + 1) & bcmk)	* ba->bh) << bbrwpt);		// next-block
+		BBT* cb = ba->v + ((((b + 0)) * ba->bh) << bbrwpt);		// current-block
+		BBT* nb = ba->v + ((((b + 1) & bcmk) * ba->bh) << bbrwpt);		// next-block
 		BBT* of = cb + ((ba->bh - ba->oc) << bbrwpt);						// overflow - beginning of overflow region
-//printf("b %d  cb %4d  nb %4d  of %4d  bh %d/%d\n", b, cb - ba->v, nb - ba->v, of - ba->v, ba->bh, ba->bh<< bbrwpt);
+		//printf("b %d  cb %4d  nb %4d  of %4d  bh %d/%d\n", b, cb - ba->v, nb - ba->v, of - ba->v, ba->bh, ba->bh<< bbrwpt);
 		memcpy(
 			(char*)cb + bkhtbt - ofszbt,
 			(char*)cb,
@@ -501,11 +501,11 @@ check_position:
 					goto end_loop;							// > conversion is finished
 			}
 		}
-//		printf("         dbk %d  drw %d  dcl %d\n", dbk, drw, dcl);
+		//		printf("         dbk %d  drw %d  dcl %d\n", dbk, drw, dcl);
 	}
 calculate_next_check_position:;								// calculate position in (horizontal-)source-byte-array
 	int i = ((dbk * (ba->bh - ba->oc)) << ba->rwpt) + drw + dcl * (ba->bh - ba->oc);					// cell-space-index of next cell to convert#
-//printf("i %d\n", i);
+	//printf("i %d\n", i);
 	while (i >= l)											// avoid using expensive modulo operator, i.e. same as i %= l
 		i -= l;
 	csc = csv + i;
@@ -513,8 +513,8 @@ calculate_next_check_position:;								// calculate position in (horizontal-)sou
 	BBT* bac = ba->v + (((((dbk * ba->bh) + drw) << ba->rwpt) + dcl) >> BBTBTCTPT);	// vertical-bit-array-cursor
 	unsigned int bacst = dcl & BBTBTCTMM;						// vertical-bit-array-cursor-shift (in bits)
 convert_next_cell:
-//printf("bac  %p  dbk %d  drw %d  dcl %d  cp %d  csc %d\n", bac, dbk, drw, dcl, cp, csc - csv);
-	///		if (DG) printf("\33[%d;%df%.3x %c ", drw + 2, 8 + dcl * 6, csc - csv, *csc ? '#' : '.');
+	//printf("bac  %p  dbk %d  drw %d  dcl %d  cp %d  csc %d\n", bac, dbk, drw, dcl, cp, csc - csv);
+		///		if (DG) printf("\33[%d;%df%.3x %c ", drw + 2, 8 + dcl * 6, csc - csv, *csc ? '#' : '.');
 	if (DG) printf("\tcsc %d  bar %d  bac %d   bax #%x  %c\n", csc - csv, drw, dcl, bac - ba->v, *csc ? '#' : '.');
 	if (dr)
 		*csc = 1 & ((*bac) >> bacst);						// convert vba -> csv
@@ -671,7 +671,7 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 	for (int dn = 1; dn < 5; ++dn) {				// duration-loop
 		UINT16 i = 0;								// cell-space-index
 		for (;;) {									// cell-space-loop
-            UINT16 cs = i;							// cell-space
+			UINT16 cs = i;							// cell-space
 			// get result byte
 			for (int tm = 0; tm < dn; ++tm) {		// time-loop
 				for (int p = 0; p < 14; ++p) {
@@ -700,8 +700,8 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
 	int64_t sc = 0;		// shift-correction
 	while (pgnc) {
-///		printf("PGNC  %d\n", pgnc);
-		// copy wrap arround buffer
+		///		printf("PGNC  %d\n", pgnc);
+				// copy wrap arround buffer
 		uint8_t* wb = vba->v;
 		wb[vba->scsz / 8] = wb[0];
 		//
@@ -714,7 +714,7 @@ int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
 			sc = -4 + pgnc;
 		pgnc -= min(4, pgnc);
 	}
-///	printf("  SC  %d\n", sc );
+	///	printf("  SC  %d\n", sc );
 
 	return -1;
 }
@@ -817,11 +817,11 @@ int64_t CA_CNFN_OMP_TEST(int64_t gnc, caBitArray* vba) {
 
 	BBT* v = vba->v;
 
-	#pragma omp parallel default(none) shared(vba) firstprivate(v, bh, oc, gnc)
+#pragma omp parallel default(none) shared(vba) firstprivate(v, bh, oc, gnc)
 	//		for (int bkcr = 0; bkcr < 1 << vba->bcpt; bkcr++)
 	{
 		int bkcr = omp_get_thread_num();
-//		printf("thread #%d\n", bkcr);
+		//		printf("thread #%d\n", bkcr);
 		while (gnc > 0) {
 			gnc -= 2;
 			//if (!gwolc || gwolc == gwolp) {
@@ -856,16 +856,16 @@ int64_t CA_CNFN_OMP_TEST(int64_t gnc, caBitArray* vba) {
 					register __m256i ymm3 = _mm256_load_si256(vbac + ri + 3);
 					register __m256i ymm4 = _mm256_load_si256(vbac + ri + 4);
 
-					ymm0 = _mm256_or_si256(	ymm0, ymm2);
+					ymm0 = _mm256_or_si256(ymm0, ymm2);
 					ymm0 = _mm256_xor_si256(ymm0, ymm1);
 
-					ymm1 = _mm256_or_si256(	ymm1, ymm3);
+					ymm1 = _mm256_or_si256(ymm1, ymm3);
 					ymm1 = _mm256_xor_si256(ymm1, ymm2);
 
-					ymm2 = _mm256_or_si256(	ymm2, ymm4);
+					ymm2 = _mm256_or_si256(ymm2, ymm4);
 					ymm2 = _mm256_xor_si256(ymm2, ymm3);
 
-					ymm0 = _mm256_or_si256(	ymm0, ymm2);
+					ymm0 = _mm256_or_si256(ymm0, ymm2);
 					ymm0 = _mm256_xor_si256(ymm0, ymm1);
 
 					_mm256_store_si256(vbac + ri, ymm0);
@@ -1192,7 +1192,7 @@ void HC_print_stats() {
 	memset(&hc_stats[HCTMXLV - 1], 0, sizeof(hc_stats[HCTMXLV - 1]));	// reset sums
 	printf("-\n");
 	printf("ll  %9s %5s  %9s %7s  %9s  %9s  %9s %6s  %8s  ll\n",
-		         "nc", "%", "sc", "fc%", "rqct", "adct", "seeks", "avgsk", "size");
+		"nc", "%", "sc", "fc%", "rqct", "adct", "seeks", "avgsk", "size");
 	static HC_STATS sl = { 0 };		// stats-last
 	HC_STATS sd = { 0 };			// stats-delta
 	for (int i = 0; i < HCTMXLV; ++i) {
@@ -1308,117 +1308,117 @@ rn		right node	- MUST have a positive uc (usage count), otherwise there is the p
 rt		unless null, will be set to the result node of the found or added branch - guaranteed to have a uc (usage count) greater than 0
 returns index of found or added branch - if newly created this will have a uc (usage count) of 0
 */
-	int hcfl = 0; // hash-cell-table-full flag
-	HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
-		// Generate checksum.
-		HCI cm;													// checksum
-		UINT32 cm32;
-		//cm32 = fnv_32a_buf(&ln, HCITPBYC, FNV1_32_INIT);
-		//cm32 = fnv_32a_buf(&rn, HCITPBYC, cm32);
+int hcfl = 0; // hash-cell-table-full flag
+HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
+	// Generate checksum.
+	HCI cm;													// checksum
+	UINT32 cm32;
+	//cm32 = fnv_32a_buf(&ln, HCITPBYC, FNV1_32_INIT);
+	//cm32 = fnv_32a_buf(&rn, HCITPBYC, cm32);
 
-		// note on optimization: speed of hash generation will not matter that much anyway compared to mem access; functon call to fnv will probably be inlined automatically
-		cm32 = fnv_32a_buf_4bt(ln, FNV1_32_INIT);
-		cm32 = fnv_32a_buf_4bt(rn, cm32);
-		// TODO
-		// xor-fold may also be not necessary since the numbers of bits needed in the hash are always a power of two (not 100% sure atm if this is realy the case)
-		//UINT32 cm32i;
-		//cm32i = FNV1_32_INIT;
-		//cm32i ^= ((unsigned char*)(&ln))[0]; cm32i *= FNV_32_PRIME;
-		//cm32i ^= ((unsigned char*)(&ln))[1]; cm32i *= FNV_32_PRIME;
-		//cm32i ^= ((unsigned char*)(&ln))[2]; cm32i *= FNV_32_PRIME;
-		//cm32i ^= ((unsigned char*)(&ln))[3]; cm32i *= FNV_32_PRIME;
-		//cm32i ^= ((unsigned char*)(&rn))[0]; cm32i *= FNV_32_PRIME;
-		//cm32i ^= ((unsigned char*)(&rn))[1]; cm32i *= FNV_32_PRIME;
-		//cm32i ^= ((unsigned char*)(&rn))[2]; cm32i *= FNV_32_PRIME;
-		//cm32i ^= ((unsigned char*)(&rn))[3]; cm32i *= FNV_32_PRIME;
-		//if (cm32 != cm32i) {
-		//	SIMFW_Die("fnv inline checksum failed!");
-		//}
+	// note on optimization: speed of hash generation will not matter that much anyway compared to mem access; functon call to fnv will probably be inlined automatically
+	cm32 = fnv_32a_buf_4bt(ln, FNV1_32_INIT);
+	cm32 = fnv_32a_buf_4bt(rn, cm32);
+	// TODO
+	// xor-fold may also be not necessary since the numbers of bits needed in the hash are always a power of two (not 100% sure atm if this is realy the case)
+	//UINT32 cm32i;
+	//cm32i = FNV1_32_INIT;
+	//cm32i ^= ((unsigned char*)(&ln))[0]; cm32i *= FNV_32_PRIME;
+	//cm32i ^= ((unsigned char*)(&ln))[1]; cm32i *= FNV_32_PRIME;
+	//cm32i ^= ((unsigned char*)(&ln))[2]; cm32i *= FNV_32_PRIME;
+	//cm32i ^= ((unsigned char*)(&ln))[3]; cm32i *= FNV_32_PRIME;
+	//cm32i ^= ((unsigned char*)(&rn))[0]; cm32i *= FNV_32_PRIME;
+	//cm32i ^= ((unsigned char*)(&rn))[1]; cm32i *= FNV_32_PRIME;
+	//cm32i ^= ((unsigned char*)(&rn))[2]; cm32i *= FNV_32_PRIME;
+	//cm32i ^= ((unsigned char*)(&rn))[3]; cm32i *= FNV_32_PRIME;
+	//if (cm32 != cm32i) {
+	//	SIMFW_Die("fnv inline checksum failed!");
+	//}
 
-		cm = ((cm32 >> HCISZPT) ^ cm32);						// Xor-fold 32bit checksum to fit size of hash-table (needed mask is applied in while-loop).
+	cm = ((cm32 >> HCISZPT) ^ cm32);						// Xor-fold 32bit checksum to fit size of hash-table (needed mask is applied in while-loop).
 
-		// Search for checksum.
-		int sc = 0;												// seek-count
-		HCI encm = 0;											// empty-node-checksum
-		UINT32 enll = 0;										// empty-node-level
-		while (1) {
-			++sc;
-			cm &= HCIMASK;
-			cm = max(1 + HCTBS, cm);							// index can never be 0 or one of the base nodes of level -1
+	// Search for checksum.
+	int sc = 0;												// seek-count
+	HCI encm = 0;											// empty-node-checksum
+	UINT32 enll = 0;										// empty-node-level
+	while (1) {
+		++sc;
+		cm &= HCIMASK;
+		cm = max(1 + HCTBS, cm);							// index can never be 0 or one of the base nodes of level -1
 
-			// Is the index occupied (ln != 0)?
-			if (hct[cm].ln) {
-				// Searched node found
-				if (hct[cm].ln == ln && hct[cm].rn == rn) {
-					hct[cm].uc++;
-					hc_stats[ll].fc++;
-					break;
-				}
-				// Unused node found
-				else if ((hct[cm].uc & HCUCMK) == 0) {
-					UINT32 cnll = (hct[cm].uc & HCLLMK) >> 24;	// current-node-level
-					// mark for recycling; prefer to recycle nodes with a higher level
-					if (cnll > enll) {
-						encm = cm;
-						enll = cnll;
-					}
-				}
-			}
-			// recycle / delete
-			if (encm && sc > HCMXSC) {
-				cm = encm;
-					int rcll = (hct[cm].uc & HCLLMK) >> 24;			// recycled-node-level
-					hct[hct[cm].ln].uc--;
-					hct[hct[cm].rn].uc--;
-					hct[hct[cm].r].uc--;
-					hct[cm].ln = 0;
-					hc_stats[rcll].nc--;
-					hc_stats[rcll].rcct++;
-				}
-			// Hashtable at checksum-index is empty > add new entry
-			if (!hct[cm].ln) {
-				hc_stats[ll].nc++;
-				hc_stats[ll].adct++;
-				// Add new branch / entry to hashtable
-				HCI fm, fmr, sl, slr, sr, srr, tb, lrt, lrn, rrt, rln;
-				hct[cm].uc = ((UINT32)ll << 24) | 1;
-				hct[cm].ln = ln;
-				hct[ln].uc++;
-				lrt = hct[ln].r;
-				lrn = hct[ln].rn;
-				hct[cm].rn = rn;
-				hct[rn].uc++;
-				rrt = hct[rn].r;
-				rln = hct[rn].ln;
-				// Query result node - first pass.
-				fm = HC_find_or_add_branch(ll - 1, lrn, rln, &fmr); // middle-result
-				// Second pass.
-				sl = HC_find_or_add_branch(ll - 1, lrt, fmr, &slr);
-				sr = HC_find_or_add_branch(ll - 1, fmr, rrt, &srr);
-				// Third pass.
-				tb = HC_find_or_add_branch(ll - 1, slr, srr, NULL);
-				hct[cm].r = tb;
-				hct[fm].uc--;
-				hct[sl].uc--;
-				hct[sr].uc--;
+		// Is the index occupied (ln != 0)?
+		if (hct[cm].ln) {
+			// Searched node found
+			if (hct[cm].ln == ln && hct[cm].rn == rn) {
+				hct[cm].uc++;
+				hc_stats[ll].fc++;
 				break;
 			}
-			++cm;
-			// hashtable size to big > abort
-			if (hcfl || sc >= HCISZ >> 2) {
-				if (!hcfl)
-					printf("ERROR! Hash-table-size insufficient! ABORTING! Hash-cell-table is CORRUPT now!\n");
-				hcfl = 1;
-				cm = hc_ens[ll];		// return empty node as result
-				break;
+			// Unused node found
+			else if ((hct[cm].uc & HCUCMK) == 0) {
+				UINT32 cnll = (hct[cm].uc & HCLLMK) >> 24;	// current-node-level
+				// mark for recycling; prefer to recycle nodes with a higher level
+				if (cnll > enll) {
+					encm = cm;
+					enll = cnll;
+				}
 			}
 		}
-		// Update stats.
-		hc_stats[ll].sc++;
-		hc_stats[ll].ss += sc;
-		//
-		if (rt)
-			*rt = hct[cm].r;
+		// recycle / delete
+		if (encm && sc > HCMXSC) {
+			cm = encm;
+			int rcll = (hct[cm].uc & HCLLMK) >> 24;			// recycled-node-level
+			hct[hct[cm].ln].uc--;
+			hct[hct[cm].rn].uc--;
+			hct[hct[cm].r].uc--;
+			hct[cm].ln = 0;
+			hc_stats[rcll].nc--;
+			hc_stats[rcll].rcct++;
+		}
+		// Hashtable at checksum-index is empty > add new entry
+		if (!hct[cm].ln) {
+			hc_stats[ll].nc++;
+			hc_stats[ll].adct++;
+			// Add new branch / entry to hashtable
+			HCI fm, fmr, sl, slr, sr, srr, tb, lrt, lrn, rrt, rln;
+			hct[cm].uc = ((UINT32)ll << 24) | 1;
+			hct[cm].ln = ln;
+			hct[ln].uc++;
+			lrt = hct[ln].r;
+			lrn = hct[ln].rn;
+			hct[cm].rn = rn;
+			hct[rn].uc++;
+			rrt = hct[rn].r;
+			rln = hct[rn].ln;
+			// Query result node - first pass.
+			fm = HC_find_or_add_branch(ll - 1, lrn, rln, &fmr); // middle-result
+			// Second pass.
+			sl = HC_find_or_add_branch(ll - 1, lrt, fmr, &slr);
+			sr = HC_find_or_add_branch(ll - 1, fmr, rrt, &srr);
+			// Third pass.
+			tb = HC_find_or_add_branch(ll - 1, slr, srr, NULL);
+			hct[cm].r = tb;
+			hct[fm].uc--;
+			hct[sl].uc--;
+			hct[sr].uc--;
+			break;
+		}
+		++cm;
+		// hashtable size to big > abort
+		if (hcfl || sc >= HCISZ >> 2) {
+			if (!hcfl)
+				printf("ERROR! Hash-table-size insufficient! ABORTING! Hash-cell-table is CORRUPT now!\n");
+			hcfl = 1;
+			cm = hc_ens[ll];		// return empty node as result
+			break;
+		}
+	}
+	// Update stats.
+	hc_stats[ll].sc++;
+	hc_stats[ll].ss += sc;
+	//
+	if (rt)
+		*rt = hct[cm].r;
 
 	return cm;
 }
@@ -1490,7 +1490,7 @@ HCI HC_add_node(int ll, HCI n, int* mxll) {
 		if (ll) {
 			hct[ln].uc--;
 			hct[rn].uc--;
-	}
+		}
 		// Prepare node one level up
 		nn = HC_add_node(ll + 1, nn, mxll);
 		return nn;
@@ -1526,7 +1526,7 @@ HCI convert_bit_array_to_hash_array(caBitArray* vba, int* ll) {
 }
 
 /*
-* 
+*
 sc_hct		source hash-table
 sl			source-level
 sn			source-node(-id)
@@ -1631,19 +1631,19 @@ UINT32* old_display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, UINT32 v, 
 //__declspec(noinline)
 UINT32*
 display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, int pll, HCI n, int dymd, UINT32* pmxv, UINT32* pmnv) {
-//	printf("xxx");
+	//	printf("xxx");
 	int hpn[HCTMXLV] = { 0 };		// heap-node
 	char hplnd[HCTMXLV] = { 0 };		// heap-left-node-done
-//	double hpv[HCTMXLV] = { 0 };		// heap-value
+	//	double hpv[HCTMXLV] = { 0 };		// heap-value
 	UINT32 hpv[HCTMXLV] = { 0 };		// heap-value
-//	double v = 1;
+	//	double v = 1;
 	UINT32 v = 1;
 	UINT32 ll = pll;
 
 	int hddh = ds.hddh;
 	int hdll = ds.hdll;
 
-	UINT32 mxv; 
+	UINT32 mxv;
 	UINT32 mnv;
 	mxv = 0;
 	mnv = MAXUINT32;
@@ -1651,15 +1651,15 @@ display_hash_array(UINT32* pbv, UINT32* pbf, UINT32* pbi, int pll, HCI n, int dy
 	while (ll <= pll) {
 		if ((hddh >= 0 && ll >= hddh + hdll) || ll == hddh * -1 - 1 + hdll) {
 			switch (dymd) {
-				case 0: v += (hct[n].uc & HCUCMK);						break;
-				case 1: v += (hct[n].uc & HCUCMK) << (pll - ll);		break;
-				case 2: v += (hct[n].uc & HCUCMK) << (ll - hdll);		break;
-				case 3: v *= (hct[n].uc & HCUCMK);						break;
+			case 0: v += (hct[n].uc & HCUCMK);						break;
+			case 1: v += (hct[n].uc & HCUCMK) << (pll - ll);		break;
+			case 2: v += (hct[n].uc & HCUCMK) << (ll - hdll);		break;
+			case 3: v *= (hct[n].uc & HCUCMK);						break;
 			}
 		}
 
 		if (ll <= hdll) {
-//			v = log2(v) / 256.0 * (double)MAXUINT32;
+			//			v = log2(v) / 256.0 * (double)MAXUINT32;
 			if (v > mxv)
 				mxv = v;
 			if (v < mnv)
@@ -1870,7 +1870,7 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 
 	// init with empty node the same size as vba->scsz
 	//hc_sl = (log2fix(vba->scsz, 1) >> 1) - 1;
- 	//hc_sn = hc_ens[hc_sl];
+	//hc_sn = hc_ens[hc_sl];
 	//hct[hc_sn].uc++;
 	//HC_print_node(hc_sl, hc_sl, hc_sn);
 
@@ -1882,8 +1882,8 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 
 /* portable way to use visual studio like union acessors in gcc */
 typedef union __m256i_u8 {
-    __m256i m256i;
-    UINT8   m256i_u8[32];
+	__m256i m256i;
+	UINT8   m256i_u8[32];
 } __m256i_u8;
 
 /* Calculate next generation - CAN ONLY HANDLE TOTALISTIC ATM, ncn fixed */
@@ -3431,7 +3431,7 @@ display_2d_matze(
 					bv++;
 				bh = 1 << bh;
 				bv = 1 << bv;
-//printf("pbs %d  %d  %d  %d\n", pbs, b, bh, bv);
+				//printf("pbs %d  %d  %d  %d\n", pbs, b, bh, bv);
 				UINT32* pnc = pnv + rpnc - plw + bh;					// pixel-screen current element
 				UINT32* pneol = pnc;									// pixel-screen end of current line
 				while (1) {
@@ -3496,8 +3496,53 @@ display_2d_matze(
 		}
 		return;
 	}
-	// Morton-Code-Layout
+	// Spiral-Layout
 	if (md == 1) {
+		int cs = pbi - pbv;
+		int d = 0;	// direction
+		int l = 1;	// length
+		int p = 0; // pos regarding to length
+		UINT32 y = ceil(sqrt(pbs) / 2);
+		UINT32 x = ceil(sqrt(pbs) / 2);
+		for (UINT32 i = 0; i < cs; ++i) {
+			UINT32* pnc = pnv + cr + y * vlpz * plw + x * hlpz;				// pixel-screen current element
+			if (pnc >= pnv && pnc < pni)
+				for (int v = 0; v < vlpzplw; v += plw)
+					for (int h = 0; h < hlpz; ++h)
+						pnc[v + h] = *pbc;
+			++pbc;
+			if (pbc >= pbi)
+				return;
+
+			switch (d) {
+			case 0:
+				y -= 1;
+				break;
+			case 1:
+				x += 1;
+				break;
+			case 2:
+				y++;
+				break;
+			case 3:
+				x -= 1;
+				break;
+			}
+			p++;
+			if (p == l) {
+				p = 0;
+				d++;
+				if (d == 2)
+					l++;
+				if (d == 4) {
+					l++;
+					d = 0;
+				}
+			}
+		}
+	}
+	// Morton-Code-Layout
+	else if (md == 1) {
 		int cs = pbi - pbv;
 		if (!mdpm) {
 			for (UINT32 i = 0; i < cs; ++i) {
@@ -3831,8 +3876,8 @@ lifeanddrawnewcleanzoom(
 	// end temporary code
 	if (ds.tm == 2) {
 		_aligned_free(tcsv);									// aligned memory management may be necesary for use of some intrinsic or opencl functions
-		tcsv = _aligned_malloc((scsz + cr->ncn - 1) * sizeof *tcsv, BYAL);
-		memcpy(tcsv, csv, scsz * sizeof *tcsv);
+		tcsv = _aligned_malloc((scsz + cr->ncn - 1) * sizeof * tcsv, BYAL);
+		memcpy(tcsv, csv, scsz * sizeof * tcsv);
 		// temporary code for debugging
 		if (cnmd == CM_HASH) {
 			if (tvba.v == NULL || res) {
@@ -4005,7 +4050,7 @@ lifeanddrawnewcleanzoom(
 						else
 							v = (double)(*pbc - mnv) / rgv;
 						lpbc = *pbc;
-						*pbc = crtl[(int)floor(v  * (CRTLSZ - 1) + .5)];
+						*pbc = crtl[(int)floor(v * (CRTLSZ - 1) + .5)];
 						lcol = *pbc;
 					}
 				}
@@ -4128,7 +4173,7 @@ lifeanddrawnewcleanzoom(
 									svt[i] = svt[i] - svt[i] * ds.ard + (dsctbl[i] - spt[i]) * ds.arf;
 									spt[i] += svt[i];
 									*/
-					// TODO - this does not use force/arf
+									// TODO - this does not use force/arf
 					spt[i] += (dsctbl[i] - spt[i]) * ds.ard;
 					dsctbl[i] = spt[i];
 					dsctbl[i] = max(0.0, dsctbl[i]);
@@ -4148,7 +4193,7 @@ lifeanddrawnewcleanzoom(
 					*pbc = getColor(1.0 / (pbi - pbv) * (pbc - pbv), ds.cm, ds.crct, ds.gm);
 			/* Line-mode (scroll or scanline) */
 			if (!ds.sfcm) {
-				for (int vi = 0; vi < ds.vlpz; ++vi) {					
+				for (int vi = 0; vi < ds.vlpz; ++vi) {
 					pbc = pbv;										// Move pixel-buffer cursor to beginning
 					int cs = min(ds.plw - hw, min((pni - pnc), ds.hlpz * (pbi - pbc) - ds.plw % ds.hlpz));		// copy-size
 					/* Horizontal-centering */
@@ -4177,7 +4222,7 @@ lifeanddrawnewcleanzoom(
 					/* Set pixel-screen-cursor to next line */
 					pnc += (pni - pnc) % ds.plw;					// move to beginning of next line
 					// scroll-mode enabled
-					if (ds.oddm == 0) {								
+					if (ds.oddm == 0) {
 						if (pnc >= pni)
 							de = 0;
 					}
@@ -4210,8 +4255,8 @@ lifeanddrawnewcleanzoom(
 		/* Calculate next generation */
 		int64_t ognc, gnc;										// (original) generations (scsz lines) to calculate
 		ognc = tm;
-//		if (!ds.sfcm && de)
-//			ognc = min(ognc, ds.vlzm);
+		if (!ds.sfcm && de)
+			ognc = min(ognc, ds.vlzm);
 		// run selected computation function
 		gnc = (ca_cnsgs[cnmd].cnfn)(ognc, &vba);
 		// negative return values of the computation function signal a shift correction to that amount
@@ -4237,8 +4282,8 @@ lifeanddrawnewcleanzoom(
 // temporary code for debugging
 		if (cnmd == CM_HASH) {
 
-			printf("otm %u  sdmrpt ######################### %d\n\n", ca_space_sz * (uint32_t)1<<(sdmrpt-2), sdmrpt);
-			CA_CNFN_VBA_1x256(ca_space_sz * ((uint32_t)1 << max(sdmrpt - 2,1)), &tvba);
+			printf("otm %u  sdmrpt ######################### %d\n\n", ca_space_sz * (uint32_t)1 << (sdmrpt - 2), sdmrpt);
+			CA_CNFN_VBA_1x256(ca_space_sz * ((uint32_t)1 << max(sdmrpt - 2, 1)), &tvba);
 			CA_SCFN_VBA(&tvba);
 		}
 		// end temporary code
@@ -4952,8 +4997,8 @@ CA_MAIN(void) {
 	}
 	// file not found - create cellspace manually
 	else {
-		ca_space = malloc(ca_space_sz * sizeof *ca_space);
-		memset(ca_space, 0, ca_space_sz * sizeof *ca_space);
+		ca_space = malloc(ca_space_sz * sizeof * ca_space);
+		memset(ca_space, 0, ca_space_sz * sizeof * ca_space);
 
 		///	ca_space[ca_space_sz / 2] = 1;
 		ca_space[0] = 1;
@@ -5067,7 +5112,8 @@ CA_MAIN(void) {
 						else
 							sfw.renderer = SDL_CreateRenderer(sfw.window, -1/*use default rendering driver*/, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 						SIMFW_SetSimSize(&sfw, 0, 0);
-						break; }
+						break;
+					}
 					default:
 						cd = 0;
 					}
@@ -5255,7 +5301,7 @@ CA_MAIN(void) {
 						SIMFW_SetFlushMsg(&sfw, "Not supported while using hash-computation-mode!");
 					}
 					else {
-						memset(ca_space, 0, ca_space_sz * sizeof *ca_space);
+						memset(ca_space, 0, ca_space_sz * sizeof * ca_space);
 						ca_space[ca_space_sz / 2] = pcg32_boundedrand(cr.ncs - 1) + 1;
 						res = 1;
 					}
@@ -5265,28 +5311,28 @@ CA_MAIN(void) {
 						SIMFW_SetFlushMsg(&sfw, "Not supported while using hash-computation-mode!");
 					}
 					else {
-						memset(ca_space, 0, ca_space_sz * sizeof *ca_space);
+						memset(ca_space, 0, ca_space_sz * sizeof * ca_space);
 						int lt = cr.ncn * 3 * (1 + lst * pcg32_boundedrand(100));
 						for (int i = 0; i < lt; i++)
 							ca_space[(ca_space_sz / 2 - lt / 2 + i) % ca_space_sz] = pcg32_boundedrand(cr.ncs);
 						res = 1;
 					}
 					break;
-				//case SDLK_t:
-				//	if (cnmd == CM_HASH) {
-				//		SIMFW_SetFlushMsg(&sfw, "Not supported while using hash-computation-mode!");
-				//	}
-				//	else {
-				//		cr.rl = (((UINT64)pcg32_random_r(&pcgr)) << 32 | pcg32_random_r(&pcgr)) % cr.nrls;
-				//		cr = CA_Rule(cr);
-				//		CA_RandomizeLinearSpace(ca_space, ca_space_sz, cr.ncs, ipow(2, pcg32_boundedrand(10)), 3);
-				//		char buf[10000] = "";
-				//		CA_RULE_PrintInfo(&cr, &buf, sizeof(buf));
-				//		SIMFW_SetFlushMsg(&sfw, &buf);
-				//		tm = 0.0;
-				//		res = 1;
-				//	}
-				//	break;
+					//case SDLK_t:
+					//	if (cnmd == CM_HASH) {
+					//		SIMFW_SetFlushMsg(&sfw, "Not supported while using hash-computation-mode!");
+					//	}
+					//	else {
+					//		cr.rl = (((UINT64)pcg32_random_r(&pcgr)) << 32 | pcg32_random_r(&pcgr)) % cr.nrls;
+					//		cr = CA_Rule(cr);
+					//		CA_RandomizeLinearSpace(ca_space, ca_space_sz, cr.ncs, ipow(2, pcg32_boundedrand(10)), 3);
+					//		char buf[10000] = "";
+					//		CA_RULE_PrintInfo(&cr, &buf, sizeof(buf));
+					//		SIMFW_SetFlushMsg(&sfw, &buf);
+					//		tm = 0.0;
+					//		res = 1;
+					//	}
+					//	break;
 				case SDLK_BACKSPACE:
 					if (cnmd == CM_HASH) {
 						if (sft) {
@@ -5571,7 +5617,7 @@ CA_MAIN(void) {
 					dyrt = 1;
 
 				// hash-cell-size has been changed
-				if (HCISZPTLV != HCISZPT) {					
+				if (HCISZPTLV != HCISZPT) {
 					HCN* hct_old;
 					hct_old = hct;
 					hct = _aligned_malloc(HCISZ * sizeof(HCN), 256);
