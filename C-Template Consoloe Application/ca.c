@@ -3496,8 +3496,88 @@ display_2d_matze(
 		}
 		return;
 	}
+	// Morton-Code-Layout
+	else if (md == 1) {
+		int cs = pbi - pbv;
+		if (!mdpm) {
+			for (UINT32 i = 0; i < cs; ++i) {
+				UINT32 y, x;
+				MortonDecode2(i, &x, &y);										// CPU-DEPENDANT !
+				UINT32* pnc = pnv + cr + y * vlpz * plw + x * hlpz;				// pixel-screen current element
+				if (pnc >= pnv && pnc < pni)
+					for (int v = 0; v < vlpzplw; v += plw)
+						for (int h = 0; h < hlpz; ++h)
+							pnc[v + h] = *pbc;
+				++pbc;
+				if (pbc >= pbi)
+					return;
+			}
+		}
+		else {
+			int ds = pow(cs, 1.0 / 3.0) + 5;			// dimension-size
+			int hb = min(pow(cs, 1.0 / 6.0) + 0.001, plw / ds - 1);					// nr. of horizontal-blocks
+			int mx = 0, tx = 0;
+			int my = 0, ty = 0;
+			for (UINT32 i = 0; i < cs; ++i) {
+				UINT32 z, y, x;
+				MortonDecode3(i, &x, &y, &z);										// CPU-DEPENDANT !
+				//MortonDecode3(i, &z, &x, &y);										// CPU-DEPENDANT !
+				tx = z % hb;
+				ty = z / hb;
+				//if (z == mdpm - 1) {
+				UINT32* pnc = pnv + cr + (y + ds * ty) * vlpz * plw + (x + ds * tx) * hlpz;				// pixel-screen current element
+				if (pnc >= pnv && pnc < pni)
+					for (int v = 0; v < vlpzplw; v += plw)
+						for (int h = 0; h < hlpz; ++h)
+							pnc[v + h] = *pbc;
+				//}
+
+				++pbc;
+				if (pbc >= pbi)
+					return;
+			}
+		}
+	}
+	// boustrophedonic Rosenberg-Strong Layout
+	else if (md == 2) {
+		int cs = pbi - pbv;
+		int d = 0;	// direction
+		int sa = 1; // shell area
+		int l = 1;	// length = one side/leg of shell
+		int p = 0;  // pos regarding to sa
+		UINT32 x = 0, y = 0, ts;
+		for (UINT32 i = 0; i < cs; ++i) {
+			if (p < l)
+				x = p,
+				y = l - 1;
+			else
+				x = l - 1,
+				y = l - p + l - 2;
+			if (l % 2)
+				ts = x,
+				x = y,
+				y = ts;
+
+			p++;
+			if (p == sa) {
+				p = 0;
+				l++;
+				sa = l + l - 1;
+			}
+
+			UINT32* pnc = pnv + cr + y * vlpz * plw + x * hlpz;				// pixel-screen current element
+			if (pnc >= pnv && pnc < pni)
+				for (int v = 0; v < vlpzplw; v += plw)
+					for (int h = 0; h < hlpz; ++h)
+						pnc[v + h] = *pbc;
+			++pbc;
+			if (pbc >= pbi)
+				return;
+
+		}
+	}
 	// Spiral-Layout
-	if (md == 1) {
+	else if (md == 3) {
 		int cs = pbi - pbv;
 		int d = 0;	// direction
 		int l = 1;	// length
@@ -3541,50 +3621,8 @@ display_2d_matze(
 			}
 		}
 	}
-	// Morton-Code-Layout
-	else if (md == 1) {
-		int cs = pbi - pbv;
-		if (!mdpm) {
-			for (UINT32 i = 0; i < cs; ++i) {
-				UINT32 y, x;
-				MortonDecode2(i, &x, &y);										// CPU-DEPENDANT !
-				UINT32* pnc = pnv + cr + y * vlpz * plw + x * hlpz;				// pixel-screen current element
-				if (pnc >= pnv && pnc < pni)
-					for (int v = 0; v < vlpzplw; v += plw)
-						for (int h = 0; h < hlpz; ++h)
-							pnc[v + h] = *pbc;
-				++pbc;
-				if (pbc >= pbi)
-					return;
-			}
-		}
-		else {
-			int ds = pow(cs, 1.0 / 3.0) + 5;			// dimension-size
-			int hb = min(pow(cs, 1.0 / 6.0) + 0.001, plw / ds - 1);					// nr. of horizontal-blocks
-			int mx = 0, tx = 0;
-			int my = 0, ty = 0;
-			for (UINT32 i = 0; i < cs; ++i) {
-				UINT32 z, y, x;
-				MortonDecode3(i, &x, &y, &z);										// CPU-DEPENDANT !
-				//MortonDecode3(i, &z, &x, &y);										// CPU-DEPENDANT !
-				tx = z % hb;
-				ty = z / hb;
-				//if (z == mdpm - 1) {
-				UINT32* pnc = pnv + cr + (y + ds * ty) * vlpz * plw + (x + ds * tx) * hlpz;				// pixel-screen current element
-				if (pnc >= pnv && pnc < pni)
-					for (int v = 0; v < vlpzplw; v += plw)
-						for (int h = 0; h < hlpz; ++h)
-							pnc[v + h] = *pbc;
-				//}
-
-				++pbc;
-				if (pbc >= pbi)
-					return;
-			}
-		}
-	}
 	// Matze-Layout
-	else if (md == 2) {
+	else if (md == 4) {
 		int rpni = pni - pnv - plw * (vlpz - 1) - (hlpz - 1);				// pixel-screen first invalid position, corrected for zoom (relative, no pointer)
 		int sd = level;														// start depth
 		int dh = sd;														// depth
@@ -4241,10 +4279,10 @@ lifeanddrawnewcleanzoom(
 			else {
 				// Move pixel-buffer cursor to beginning
 				pbc = pbv;
-				if (ds.sfcm <= 4)
+				if (ds.sfcm <= 6)
 					display_2d_matze(pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcm - 1, ds.sfcmp);
 				else if (ds.sfcm < 5 + LMS_COUNT)
-					display_2d_lindenmeyer(LMSA[ds.sfcm - 5], pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcsw, -1, NULL, NULL, NULL);
+					display_2d_lindenmeyer(LMSA[ds.sfcm - 7], pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcsw, -1, NULL, NULL, NULL);
 				else
 					display_2d_chaotic(pnv + hw, pni, ds.plw, ds.plw - hw, csv, csi, pbv, pbi, dyrt);
 				de = 0;
