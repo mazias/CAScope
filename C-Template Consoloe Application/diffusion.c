@@ -458,7 +458,7 @@ printf("sz pixel %d  line %d  all %d\n", sizeof(*oans) * 2, sizeof(*oans) * 2 * 
 				case SDLK_SPACE:		init_sint(ans, h, w);	break;
 				case SDLK_b:
 					if (shft)
-						box_sint(ans, h, w, 0, 0);
+						box_sint(ans, h, w);
 					else
 						box_outline_sint(ans, h, w, 0, 0);
 					break;

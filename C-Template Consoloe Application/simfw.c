@@ -792,7 +792,7 @@ SIMFW_UpdateDisplay(SIMFW *simfw) {
 	SDL_LockTexture(simfw->sim_texture, NULL, &simfw->sim_canvas, &pitch);	// lock texture to be able to access pixels
 
 	/* Copy status text to display */
-	if (simfw->status_text_texture) {
+																																																																																																																																																																																																		if (simfw->status_text_texture) {
 		SDL_Rect dst_rct = { 0 };
 		SDL_QueryTexture(simfw->status_text_texture, NULL, NULL, &dst_rct.w, &dst_rct.h);
 		dst_rct.x = 0;// (simfw->window_width - dst_rct.w) / 2;

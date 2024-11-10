@@ -64,7 +64,7 @@ SIMFW sfw = { 0 };
 CA_CT* ca_space = NULL;								// cell-space
 uint64_t ca_space_sz = 1 << 16;
 
-int sdmrpt;											// hash-array - speed-multiplicator-as-power-of-two - 1 means ca runs with speed of half its size (speed=(size/2)*2^(sdmrpt-1))
+int sdmrpt;											// hash-array - speed-multiplicator-as-power-of-two - 1 means ca runs with speed of half its size -> if sdmrpt > 0 : speed = (double)ca_space_sz * pow(2.0, sdmrpt - 2.0)
 
 
 typedef struct caDisplaySettings {
@@ -697,11 +697,12 @@ void CA_CNITFN_LUT(caBitArray* vba, CA_RULE* cr) {
 	}
 }
 
+// TODO shift-correction calculated here is not used anymore, so there may be errors in displaying, especially when pgnc is not a multiple of 4
 int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
 	int64_t sc = 0;		// shift-correction
 	while (pgnc) {
 		///		printf("PGNC  %d\n", pgnc);
-				// copy wrap arround buffer
+		// copy wrap arround buffer
 		uint8_t* wb = vba->v;
 		wb[vba->scsz / 8] = wb[0];
 		//
@@ -716,7 +717,7 @@ int64_t CA_CNFN_LUT(int64_t pgnc, caBitArray* vba) {
 	}
 	///	printf("  SC  %d\n", sc );
 
-	return -1;
+	return 0;
 }
 
 void CA_CNITFN_BOOL(caBitArray* vba, CA_RULE* cr) {
@@ -801,7 +802,7 @@ int64_t CA_CNFN_VBA_1x256(int64_t gnc, caBitArray* vba) {
 		}
 	}
 
-	return gnc;
+	return 0;
 }
 
 int64_t CA_CNFN_OMP_TEST(int64_t gnc, caBitArray* vba) {
@@ -2143,6 +2144,7 @@ int64_t CA_CNFN_SIMD(int64_t pgnc, caBitArray* vba) {
 int64_t CA_CNFN_SISD(int64_t pgnc, caBitArray* vba) {
 	while (pgnc > 0) {
 		pgnc--;
+
 		memcpy(vba->clsc + vba->scsz, vba->clsc, vba->brsz * sizeof * vba->clsc);
 
 		if (vba->cr->ncn == 3)
@@ -2880,19 +2882,17 @@ CA_RULE_PrintInfo(CA_RULE* cr, char* os, size_t sgsz) {
 			else if (cr->tp == ABS)								// absolute
 				rds += ipow(cr->ncs, cr->ncn - k - 1) * rns;
 			// print
-			sprintfa_s(snst, sizeof(snst), "%d", rns); // actually displays it in wrong order, i.e. rightmost neighbor is printed leftmost > has to be reversed before displaying
+			sprintfa_s(snst, sizeof(snst), "%d", rns);
 		}
-		reverse(snst);
-		//sprintfa_s(os, sgsz, "%2d   %s\n", rds, snst);
-		sprintfa_s(tnst[rds], 500, "%s ", snst);
+		sprintfa_s(tnst[rds], 500, "%s", snst);
 	}
 
 	// print table
 	for (int i = 0; i < cr->nns; ++i) {
-		sprintfa_s(os, sgsz, "%2d   %d   %s", i, cr->rltl[i], tnst[i]);
-		// for columns
+		sprintfa_s(os, sgsz, "#%d %s>%d", i, tnst[i], cr->rltl[i]);
+		// four columns
 		if ((i + 1) % 4)
-			sprintfa_s(os, sgsz, "  |  ");
+			sprintfa_s(os, sgsz, " | ");
 		else
 			sprintfa_s(os, sgsz, "\n");
 	}
@@ -3909,26 +3909,10 @@ lifeanddrawnewcleanzoom(
 
 	/* Init testing-cell-space-buffer */
 	static CA_CT* tcsv = NULL;									// test-cell-array first valid element
-	// temporary code for debugging
-	static caBitArray tvba = { 0 };
-	// end temporary code
 	if (ds.tm == 2) {
 		_aligned_free(tcsv);									// aligned memory management may be necesary for use of some intrinsic or opencl functions
 		tcsv = _aligned_malloc((scsz + cr->ncn - 1) * sizeof * tcsv, BYAL);
 		memcpy(tcsv, csv, scsz * sizeof * tcsv);
-		// temporary code for debugging
-		if (cnmd == CM_HASH) {
-			if (tvba.v == NULL || res) {
-				_aligned_free(tvba.v);							// aligned memory management may be necesary for use of some intrinsic or opencl functions
-				tvba = (const struct caBitArray){ 0 };
-				tvba.cr = cr;
-				tvba.clsc = tcsv;
-				tvba.scsz = scsz;
-				tvba.brsz = brsz;
-				CA_CNITFN_VBA_1x256(&tvba, cr);
-			}
-		}
-		// end temporary code
 	}
 
 	/* Init bit-array-cell-space-buffer */
@@ -4291,21 +4275,20 @@ lifeanddrawnewcleanzoom(
 
 		/* EVOLVE - Calculate next generation(s) of CA */
 		/* Calculate next generation */
-		int64_t ognc, gnc;										// (original) generations (scsz lines) to calculate
-		ognc = tm;
+		int64_t gnc;											// (original) generations (scsz lines) to calculate
+		gnc = tm;
+		// only generate max ds.vlzm generations when not in screen-filling-mode
 		if (!ds.sfcm && de)
-			ognc = min(ognc, ds.vlzm);
+			gnc = min(gnc, ds.vlzm);
 		// run selected computation function
-		gnc = (ca_cnsgs[cnmd].cnfn)(ognc, &vba);
+		(ca_cnsgs[cnmd].cnfn)(gnc, &vba);
 		// negative return values of the computation function signal a shift correction to that amount
 		int64_t sc = 0;											// shift-correction
-		if (gnc < 0) {
-			sc = gnc;
-			gnc = 0;
-		}
 		//
-		tm -= (ognc - gnc);										// adjust time
-		csf -= ((ognc - gnc) * (cr->ncn / 2)) % scsz;			// correct for shift
+		tm -= gnc;												// adjust time
+		sc = -((gnc * (cr->ncn - 1)) / 2);						// shift-correction
+		csf += sc % scsz;										// correct for shift
+//printf("gnc %I64d  ncn %d  sc %I64d\n", gnc, cr->ncn, sc);
 		if (csf < csv)
 			csf += scsz;
 		if (csf >= csi)
@@ -4317,28 +4300,24 @@ lifeanddrawnewcleanzoom(
 	/* Test calculation */
 	if (ds.tm == 2 && tcsv != NULL) {
 		// calculate test-cell-space to compare
-// temporary code for debugging
 		if (cnmd == CM_HASH) {
-
-			printf("otm %u  sdmrpt ######################### %d\n\n", ca_space_sz * (uint32_t)1 << (sdmrpt - 2), sdmrpt);
-			CA_CNFN_VBA_1x256(ca_space_sz * ((uint32_t)1 << max(sdmrpt - 2, 1)), &tvba);
-			CA_SCFN_VBA(&tvba);
+			if (sdmrpt)
+				otm = (double)ca_space_sz * pow(2.0, sdmrpt - 2.0);
+			else
+				otm = 0;
 		}
-		// end temporary code
-		else {
-			for (int g = 0; g < otm; ++g) {
-				// copy wrap-arround-buffer / border
-				for (int c = 0; c < cr->ncn - 1; ++c) {
-					tcsv[scsz + c] = tcsv[c];
-				}
-				// calc next gen
-				ca_next_gen__sisd(cr, tcsv, tcsv + scsz);
-			}
+		//printf("otm %d\n", otm);
+		for (int g = 0; g < otm; ++g) {
+			// copy wrap-arround-buffer / border
+			for (int c = 0; c < cr->ncn - 1; ++c)
+				tcsv[scsz + c] = tcsv[c];
+			// calc next gen
+			ca_next_gen__sisd(cr, tcsv, tcsv + scsz);
 		}
 		// compare
 		int mcr = memcmp(csv, tcsv, scsz * sizeof * csv);
 		if (mcr != 0) {
-			printf("TESTMODE ERROR  mcr %d  tm %lld  sz %d", mcr, otm, scsz * sizeof * csv);
+			printf("TESTMODE ERROR  mcr %d  tm %lld  sz %d | ", mcr, otm, scsz * sizeof * csv);
 			int esf = 0, pd = 1, ec = 0, lp = 0;		// esf=errors-found, pd=print-enabled, ec=error-count, lp=last-position
 			for (int c = 0; c < scsz; ++c) {
 				if (tcsv[c] != csv[c]) {
