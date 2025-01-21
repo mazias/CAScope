@@ -1143,7 +1143,7 @@ typedef UINT32 HCI;							// hash-cell-index-type
 #define HCITPBYC 4							// hash-cell-index-type-byte-count
 UINT32 HCISZPT = 20;						// hash-cell-index-size as power of two, i.e. 8 = index size of 256;
 UINT32 HCMXSC = 8;							// hash-cell-maximum-seek-count
-#define HCTMXLV	64							// hash-cell-table-max-level
+#define HCTMXLV	62							// hash-cell-table-max-level
 
 #define HCTBSPT	2							// hash-cell-table-base-size as power of two -- MUST BE 2 ATM
 #define HCTBS (1<<HCTBSPT)					// hash-cell-table-base-size / size of lowest/smallest level
@@ -1186,42 +1186,42 @@ HC_STATS {
 	int rcct;								// recycled-count
 	int adct;								// added-count
 } HC_STATS;
-HC_STATS hc_stats[HCTMXLV] = { 0 };
+HC_STATS hc_stats[HCTMXLV + 2] = { 0 };		// hash-cell-stats - the two extra values are needed to store delta and sum statistics
 
 void HC_print_stats() {
 	// display stats
-	memset(&hc_stats[HCTMXLV - 1], 0, sizeof(hc_stats[HCTMXLV - 1]));	// reset sums
+	memset(&hc_stats[HCTMXLV + 1], 0, sizeof(hc_stats[HCTMXLV + 1]));	// reset sums
 	printf("-\n");
 	printf("ll  %9s %5s  %9s %7s  %9s  %9s  %9s %6s  %8s  ll\n",
 		"nc", "%", "sc", "fc%", "rqct", "adct", "seeks", "avgsk", "size");
 	static HC_STATS sl = { 0 };		// stats-last
 	HC_STATS sd = { 0 };			// stats-delta
 	for (int i = 0; i < HCTMXLV; ++i) {
-		if (i < HCTMXLV - 2) {
+		if (i < HCTMXLV) {
 			// sum
-			hc_stats[HCTMXLV - 1].nc += hc_stats[i].nc;
-			hc_stats[HCTMXLV - 1].sc += hc_stats[i].sc;
-			hc_stats[HCTMXLV - 1].fc += hc_stats[i].fc;
-			hc_stats[HCTMXLV - 1].rcct += hc_stats[i].rcct;
-			hc_stats[HCTMXLV - 1].adct += hc_stats[i].adct;
-			hc_stats[HCTMXLV - 1].ss += hc_stats[i].ss;
+			hc_stats[HCTMXLV + 1].nc += hc_stats[i].nc;
+			hc_stats[HCTMXLV + 1].sc += hc_stats[i].sc;
+			hc_stats[HCTMXLV + 1].fc += hc_stats[i].fc;
+			hc_stats[HCTMXLV + 1].rcct += hc_stats[i].rcct;
+			hc_stats[HCTMXLV + 1].adct += hc_stats[i].adct;
+			hc_stats[HCTMXLV + 1].ss += hc_stats[i].ss;
 		}
-		else if (i == HCTMXLV - 2) {
+		else if (i == HCTMXLV) {
 			// delta
-			sd.nc = hc_stats[HCTMXLV - 1].nc - sl.nc;
-			sd.sc = hc_stats[HCTMXLV - 1].sc - sl.sc;
-			sd.fc = hc_stats[HCTMXLV - 1].fc - sl.fc;
-			sd.rcct = hc_stats[HCTMXLV - 1].rcct - sl.rcct;
-			sd.adct = hc_stats[HCTMXLV - 1].adct - sl.adct;
-			sd.ss = hc_stats[HCTMXLV - 1].ss - sl.ss;
-			hc_stats[HCTMXLV - 2] = sd;
-			sl = hc_stats[HCTMXLV - 1];
+			sd.nc = hc_stats[HCTMXLV + 1].nc - sl.nc;
+			sd.sc = hc_stats[HCTMXLV + 1].sc - sl.sc;
+			sd.fc = hc_stats[HCTMXLV + 1].fc - sl.fc;
+			sd.rcct = hc_stats[HCTMXLV + 1].rcct - sl.rcct;
+			sd.adct = hc_stats[HCTMXLV + 1].adct - sl.adct;
+			sd.ss = hc_stats[HCTMXLV + 1].ss - sl.ss;
+			hc_stats[HCTMXLV] = sd;
+			sl = hc_stats[HCTMXLV + 1];
 			printf("=== DELTA%91s\n", "");
 		}
 		else
 			printf("=== SUM%93s\n", "");
 
-		if (i && hc_stats[i].nc <= 3 && !hc_stats[i].sc && i < HCTMXLV - 2)
+		if (i && hc_stats[i].nc <= 3 && !hc_stats[i].sc && i < HCTMXLV)
 			continue;
 		double avgsk;
 		if (hc_stats[i].ss == 0 || abs(hc_stats[i].sc) == 0)
@@ -1244,7 +1244,7 @@ void HC_print_stats() {
 	printf("---%97s\n", "");
 	printf("sz  tl %ub / %.2fmb  n %u / %.2fb/n\n", HCISZ * sizeof(HCN), (float)HCISZ * sizeof(HCN) / 1024.0 / 1024.0, HCISZ, (float)sizeof(HCN));
 	printf("max-seek-count %d%20s\n", HCMXSC, "");
-	printf("found-count%% %f%%\n", (100.0 / max(1, abs(hc_stats[HCTMXLV - 1].sc)) * abs(hc_stats[HCTMXLV - 1].fc)));
+	printf("found-count%% %f%%\n", (100.0 / max(1, abs(hc_stats[HCTMXLV + 1].sc)) * abs(hc_stats[HCTMXLV + 1].fc)));
 	printf("-%99s\n", "");
 	printf("%100s\n", "");
 	printf("%100s\n", "");
@@ -1406,7 +1406,7 @@ HCI HC_find_or_add_branch(UINT32 ll, HCI ln, HCI rn, HCI* rt) {
 		}
 		++cm;
 		// hashtable size to big > abort
-		if (hcfl || sc >= HCISZ >> 2) {
+		if (hcfl || sc >= min(1024, HCISZ >> 2)) {
 			if (!hcfl)
 				printf("ERROR! Hash-table-size insufficient! ABORTING! Hash-cell-table is CORRUPT now!\n");
 			hcfl = 1;
@@ -1772,8 +1772,8 @@ void HC_init_empty_nodes() {
 	for (int i = 0; i < HCTMXLV; i++)
 		hc_ens[i] = en = HC_find_or_add_branch(i, en, en, NULL);
 
-	// clear stats - otherwise stats are full to all levels until´speed is higher zero
-	for (int i = 0; i < HCTMXLV - 2; i++) {
+	// clear stats - otherwise stats are full to all levels until speed is higher zero
+	for (int i = 0; i < HCTMXLV; i++) {
 		hc_stats[i].fc = 0;
 		hc_stats[i].rcct = 0;
 		hc_stats[i].adct = 0;
@@ -1864,10 +1864,17 @@ void CA_CNITFN_HASH(caBitArray* vba, CA_RULE* cr) {
 	HC_init(cr);
 	HC_print_stats(0);
 
-	//
-	convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz);
-	printf("hash init 2\n");
-	hc_sn = convert_bit_array_to_hash_array(vba, &hc_sl);
+	// no cell-space conversion for very large space-sizes
+	if (vba->scsz >= 1 << 26) {
+		hc_sl = (int)log2((double)vba->scsz) - 2; // hash-table-size-level
+		printf("space-size very large (%llu) > using empty hash-node (level %d) for initialization\n", vba->scsz, hc_sl);
+		hc_sn = hc_ens[hc_sl];
+	}
+	else {
+		convert_CA_CT_to_bit_array(vba->clsc, (FBPT*)vba->v, vba->scsz);
+		printf("hash init 2\n");
+		hc_sn = convert_bit_array_to_hash_array(vba, &hc_sl);
+	}
 
 	// init with empty node the same size as vba->scsz
 	//hc_sl = (log2fix(vba->scsz, 1) >> 1) - 1;
@@ -3801,6 +3808,15 @@ lifeanddrawnewcleanzoom(
 		printf("INFO focus-mode set to totalistic, since not in hash-computation-mode.\n");
 		ds.fsme = 0;
 	}
+	/* Disable use of cell-space buffer for very large space-sizes */
+	int csd = 0;												// cell-space-disabled
+	if (ds.fsme == 2 && scsz >= 1 << 26) {
+		csd = 1;
+		if (ds.tm == 2) {
+			ds.tm = 0;
+			printf("WARNING test-mode can not be used - space-size too big!\n");
+		}
+	}
 	/* Init vars and defines */
 	ds.lgm %= 2;
 	if (!ds.hlfs)
@@ -3894,22 +3910,23 @@ lifeanddrawnewcleanzoom(
 	static CA_CT* csv = NULL;									// cell-array first valid element
 	static CA_CT* csi = NULL;									// cell-array first invalid element
 	static CA_CT* csf = NULL;									// position of first cell, corrected for shifting
-	if (!csv || res) {
-		_aligned_free(csv);
-		csf = csv = _aligned_malloc((scsz + brsz) * sizeof * csv, BYAL);
-		csi = csv + scsz;
-		memcpy(csv, sc, scsz * sizeof * csv);
+	if (!csd) {
+		if (!csv || res) {
+			_aligned_free(csv);
+			csf = csv = _aligned_malloc((scsz + brsz) * sizeof * csv, BYAL);
+			csi = csv + scsz;
+			memcpy(csv, sc, scsz * sizeof * csv);
+		}
+		// apply manual shift correction
+		csf += ds.mlsc;
+		while (csf < csv)
+			csf += scsz;
+		while (csf >= csi)
+			csf -= scsz;
 	}
-	// apply manual shift correction
-	csf += ds.mlsc;
-	while (csf < csv)
-		csf += scsz;
-	while (csf >= csi)
-		csf -= scsz;
-
 	/* Init testing-cell-space-buffer */
 	static CA_CT* tcsv = NULL;									// test-cell-array first valid element
-	if (ds.tm == 2) {
+	if (ds.tm == 2 && !csd) {
 		_aligned_free(tcsv);									// aligned memory management may be necesary for use of some intrinsic or opencl functions
 		tcsv = _aligned_malloc((scsz + cr->ncn - 1) * sizeof * tcsv, BYAL);
 		memcpy(tcsv, csv, scsz * sizeof * tcsv);
@@ -3930,7 +3947,7 @@ lifeanddrawnewcleanzoom(
 			(ca_cnsgs[cnmd].itfn)(&vba, cr);
 
 			/* Test cell-space conversion */
-			if (ds.tm == 2) {
+			if (ds.tm == 2 && !csd) {
 				if (ca_cnsgs[cnmd].scfn != NULL) {
 					printf("Testing cell-space-conversion\n");
 					printf("\tCA_SCFN  %s\n", ca_cnsgs[cnmd].name);
@@ -4021,7 +4038,7 @@ lifeanddrawnewcleanzoom(
 		   * 3. screen-filling-curve-mode - the 1d ca-line is drawn on the 2d screen using one of several screen-filling-curves
 		*/
 		if (de) {
-			if (ds.fsme == 2 && cnmd == CM_HASH) {
+			if ((ds.fsme == 2 && cnmd == CM_HASH) || csd) {
 #define CRTLSZ (1 << 10)
 #define LOGPRECISION 4
 #define LOGSCALE (1U<<LOGPRECISION)
@@ -4267,7 +4284,7 @@ lifeanddrawnewcleanzoom(
 					display_2d_matze(pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcm - 1, ds.sfcmp);
 				else if (ds.sfcm < 5 + LMS_COUNT)
 					display_2d_lindenmeyer(LMSA[ds.sfcm - 7], pnv + hw, pni, ds.plw, ds.plw - hw, ds.vlpz, ds.hlpz, pbv, pbi, ds.sfcsw, -1, NULL, NULL, NULL);
-				else
+				else if (!csd)
 					display_2d_chaotic(pnv + hw, pni, ds.plw, ds.plw - hw, csv, csi, pbv, pbi, dyrt);
 				de = 0;
 			}
@@ -4286,19 +4303,21 @@ lifeanddrawnewcleanzoom(
 		int64_t sc = 0;											// shift-correction
 		//
 		tm -= gnc;												// adjust time
-		sc = -((gnc * (cr->ncn - 1)) / 2);						// shift-correction
-		csf += sc % scsz;										// correct for shift
-//printf("gnc %I64d  ncn %d  sc %I64d\n", gnc, cr->ncn, sc);
-		if (csf < csv)
-			csf += scsz;
-		if (csf >= csi)
-			csf -= scsz;
+		if (!csd) {
+			sc = -((gnc * (cr->ncn - 1)) / 2);					// shift-correction
+			csf += sc % scsz;									// correct for shift
+			//printf("gnc %I64d  ncn %d  sc %I64d\n", gnc, cr->ncn, sc);
+			if (csf < csv)
+				csf += scsz;
+			if (csf >= csi)
+				csf -= scsz;
+		}
 		if (tm < 1)
 			break;
 	}
 
 	/* Test calculation */
-	if (ds.tm == 2 && tcsv != NULL) {
+	if (ds.tm == 2 && tcsv != NULL && !csd) {
 		// calculate test-cell-space to compare
 		if (cnmd == CM_HASH) {
 			if (sdmrpt)
@@ -4441,7 +4460,7 @@ lifeanddrawnewcleanzoom(
 	if (ds.oddm == 1)
 		spnc = pnc;
 	/* Copy space back with correct alignment */
-	if (ds.fsme < 2 || ds.tm == 2)
+	if ((ds.fsme < 2 || ds.tm == 2) && !csd)
 		for (int i = 0; i < scsz; ++i) {
 			CA_CT csc = csf - csv + i;
 			if (csc > scsz)
@@ -4997,40 +5016,46 @@ CA_MAIN(void) {
 	/* Control-Mode */
 	enum CLMD { CLMD_NONE, CLMD_RULE, CLMD_SCREEN } clmd = CLMD_NONE;
 
-	ca_space_sz = max(1 << 10, ca_space_sz);
-	ca_space_sz = min(1 << 20, ca_space_sz);
+//	ca_space_sz = max(1 << 10, ca_space_sz);
+//	ca_space_sz = min(1 << 20, ca_space_sz);
+	/* Disable use of cell-space buffer for very large space-sizes */
+	int csd = 0;												// cell-space-disabled
+	if (ca_space_sz >= 1 << 26)
+		csd = 1;
 
 	int pitch = 0;
 	cr = CA_Rule(cr);
 
 	// try to load cell-space from file
-	CA_CT* nwsc = NULL;										// new space
-	int nwsz = 0;											// new size
-	nwsc = CA_LoadFromFile("cellspace.bin", &nwsz);
-	// file found
-	if (nwsc && nwsz) {
-		ca_space_sz = nwsz;									// remember new size
-		ca_space = nwsc;									// set new space as curren
-	}
-	// file not found - create cellspace manually
-	else {
-		ca_space = malloc(ca_space_sz * sizeof * ca_space);
-		memset(ca_space, 0, ca_space_sz * sizeof * ca_space);
-
-		///	ca_space[ca_space_sz / 2] = 1;
-		ca_space[0] = 1;
-		ca_space[1] = 1;
-		ca_space[3] = 1;
-		ca_space[8] = 1;
-		ca_space[16] = 1;
-		for (int i = 0; i < 2; ++i) {
-			int pos = pcg32_boundedrand(ca_space_sz);
-			int lh = ipow(2, pcg32_boundedrand(3) + 6);
-			printf("rdm  %d - %d\n", pos % ca_space_sz, lh);
-			for (int i = 0; i < lh; ++i)
-				*(ca_space + (pos + i) % ca_space_sz) = pcg32_boundedrand(cr.ncs);
+	if (!csd) {
+		CA_CT* nwsc = NULL;										// new space
+		uint64_t nwsz = 0;											// new size
+		nwsc = CA_LoadFromFile("cellspace.bin", &nwsz);
+		// file found
+		if (nwsc && nwsz) {
+			ca_space_sz = nwsz;									// remember new size
+			ca_space = nwsc;									// set new space as curren
 		}
+		// file not found - create cellspace manually
+		else {
+			ca_space = malloc(ca_space_sz * sizeof * ca_space);
+			memset(ca_space, 0, ca_space_sz * sizeof * ca_space);
 
+			///	ca_space[ca_space_sz / 2] = 1;
+			ca_space[0] = 1;
+			ca_space[1] = 1;
+			ca_space[3] = 1;
+			ca_space[8] = 1;
+			ca_space[16] = 1;
+			for (int i = 0; i < 2; ++i) {
+				int pos = pcg32_boundedrand(ca_space_sz);
+				int lh = ipow(2, pcg32_boundedrand(3) + 6);
+				printf("rdm  %d - %d\n", pos % ca_space_sz, lh);
+				for (int i = 0; i < lh; ++i)
+					*(ca_space + (pos + i) % ca_space_sz) = pcg32_boundedrand(cr.ncs);
+			}
+
+		}
 	}
 
 	//
@@ -5431,27 +5456,29 @@ CA_MAIN(void) {
 						ds.hlpz = ds.vlpz = min(ds.hlpz, ds.vlpz) + 1,
 						fscd = 1;
 					else if (cnmd == CM_HASH) {
-						HCI en;		// new (empty or copied) node
-						if (ctl) {
-							// empty node with the same size as current ca
-							en = hc_ens[hc_sl];
-						}
-						else
-							// copy the whole current cell-space
-							en = hc_sn;
-						// connect current ca with new (empty or copied) node
-						hc_sl++;
-						HCI hn = HC_find_or_add_branch(hc_sl, hc_sn, en, NULL);
-						hct[hc_sn].uc--;
-						hc_sn = hn;
+						if (hc_sl < HCTMXLV - 1) {
+							HCI en;		// new (empty or copied) node
+							if (ctl) {
+								// empty node with the same size as current ca
+								en = hc_ens[hc_sl];
+							}
+							else
+								// copy the whole current cell-space
+								en = hc_sn;
+							// connect current ca with new (empty or copied) node
+							hc_sl++;
+							HCI hn = HC_find_or_add_branch(hc_sl, hc_sn, en, NULL);
+							hct[hc_sn].uc--;
+							hc_sn = hn;
 
-						ca_space_sz = ca_space_sz * 2;
-						// TODO UGLY hack to avoid allocating memory for possibly very large cell-spaces
-						if (ds.fsme == 2 && ca_space_sz >= 1 << 20) {
-							last_ca_space_sz = ca_space_sz;
-							SIMFW_SetFlushMsg(&sfw, "WARNING  Sync to global cell-space deactivated! You cannot use any other display mode or any functions that access the global cell-space (which are most)!");
+							ca_space_sz = ca_space_sz * 2;
+							// TODO UGLY hack to avoid allocating memory for possibly very large cell-spaces
+							if (ds.fsme == 2 && ca_space_sz >= 1 << 20) {
+								last_ca_space_sz = ca_space_sz;
+								SIMFW_SetFlushMsg(&sfw, "WARNING  Sync to global cell-space deactivated! You cannot use any other display mode or any functions that access the global cell-space (which are most)!");
+							}
+							dyrt = 1;
 						}
-						dyrt = 1;
 					}
 					else if (ctl)
 						ds.hlzm = ds.vlzm = min(ds.hlzm, ds.vlzm) + 1,
@@ -5473,7 +5500,7 @@ CA_MAIN(void) {
 
 						ca_space_sz = ca_space_sz / 2;
 						// TODO UGLY hack to avoid allocating memory for possibly very large cell-spaces
-						if (ds.fsme == 2 && ca_space_sz >= 1 << 26) {
+						if (ds.fsme == 2 && ca_space_sz >= 1 << 20) {
 							last_ca_space_sz = ca_space_sz;
 							SIMFW_SetFlushMsg(&sfw, "WARNING  Sync to global cell-space deactivated! You cannot use any other display mode or any functions that access the global cell-space (which are most)!");
 						}
@@ -5747,7 +5774,7 @@ CA_MAIN(void) {
 			fpstr = 0;
 		}
 		if (sdmrpt)
-			for (int i = 0; i < HCTMXLV - 2; i++) {
+			for (int i = 0; i < HCTMXLV; i++) {
 				hc_stats[i].fc = 0;
 				hc_stats[i].rcct = 0;
 				hc_stats[i].adct = 0;
